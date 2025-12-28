@@ -15,8 +15,9 @@ from skills/ directory, put them in ~/.claude/skills/ and unzip them.
 
 | Skill | Description |
 |-------|-------------|
-| **e2b** | Execute code in secure E2B cloud sandboxes with MCP gateway (200+ tools) |
 | **claude-agent-sdk** | Build apps with Claude Agent SDK (TypeScript/Python) |
+| **e2b** | Execute code in secure E2B cloud sandboxes with MCP gateway (200+ tools) |
+| **polymarket** | Build trading bots on Polymarket prediction markets (py-clob-client SDK) |
 | **second-opinion** | Get second opinion from OpenAI via Codex CLI |
 | **skill-creator** | Guide for creating Claude Code skills |
 
