@@ -1,6 +1,7 @@
 ---
 name: swarm
 description: Orchestrates multi-agent implementation using Tech Lead + DevAgent pattern. Parses phased plans, builds dependency graphs, spawns DevAgents per phase with automatic parallelization via git worktrees when safe. Reviews PRs rigorously, handles retries with escalation. Use when the user has a phased implementation plan and wants to execute it with parallel agents.
+version: 1.1.0
 argument-hint: "[init | <plan-file>]"
 ---
 
@@ -21,7 +22,7 @@ The base branch name is stored in the plan's status file (`<plan-file>.swarm_sta
 
 **swarm.py shorthand**: All `swarm.py` commands in this document expand to:
 ```bash
-python3 ~/.claude/skills/swarm/scripts/swarm.py
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/swarm.py
 ```
 
 ## Step 0: Prerequisites
@@ -35,7 +36,7 @@ Follow the full initialization workflow in [references/prerequisites.md](referen
 ### `/swarm` or `/swarm <plan-file>`
 
 ```bash
-python3 ~/.claude/skills/swarm/scripts/swarm.py prereq <plan-file>
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/swarm.py prereq <plan-file>
 ```
 
 **If it fails with missing Makefile or directory structure: STOP and tell the user to run `/swarm init` first.**
@@ -113,7 +114,7 @@ Synthetic integration fix phases (Step 6.4) follow the same flow with ID prefix 
 ## Step 1: Parse Plan and Build Dependency Graph
 
 ```bash
-python3 ~/.claude/skills/swarm/scripts/swarm.py parse <plan-file>
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/swarm.py parse <plan-file>
 ```
 
 The `parse` command also records the current branch as `base_branch` in the status file.
@@ -175,16 +176,13 @@ Create worktrees for all ready phases before spawning agents (Step 3).
 
 ## Step 3: Spawn DevAgents
 
-Spawn a `general-purpose` subagent for each DISPATCHED phase. For multiple ready phases, spawn in parallel.
+Spawn a `dev-agent` subagent for each DISPATCHED phase. For multiple ready phases, spawn in parallel.
 
 ```
 Task(
-  subagent_type: "general-purpose",
+  subagent_type: "swarm:dev-agent",
   description: "Implement Phase N: <name>",
   prompt: """
-  You are a DevAgent. First cd to your working directory, then read your instructions:
-  cat ~/.claude/skills/swarm-developer-guide/SKILL.md
-
   Phase: N
   Branch: <branch-name>
   Plan file: <full-path-to-plan-file>
@@ -194,7 +192,7 @@ Task(
 )
 ```
 
-**Note:** The `general-purpose` subagent inherits permission settings from the parent session. Ensure your Claude Code permissions allow autonomous file and bash operations to avoid blocking parallel DevAgents.
+The `dev-agent` runs on Sonnet with preloaded instructions from the swarm-developer-guide skill, maxTurns=50, and bypassPermissions mode.
 
 ## Step 4: Review the PR
 
@@ -297,12 +295,9 @@ swarm.py update <plan-file> --phase <N> --status REJECTED
 **Tech Lead: spawn DevAgent to fix:**
 ```
 Task(
-  subagent_type: "general-purpose",
+  subagent_type: "swarm:dev-agent",
   description: "Fix Phase N review feedback (attempt M/3)",
   prompt: """
-  You are a DevAgent. First cd to your working directory, then read your instructions:
-  cat ~/.claude/skills/swarm-developer-guide/SKILL.md
-
   Phase: N (fix)
   Branch: fix-<branch-name>
   Plan file: <full-path-to-plan-file>
@@ -414,12 +409,9 @@ swarm.py update <plan-file> --phase I-<group> --status DISPATCHED
 **Spawn DevAgent to fix integration issues:**
 ```
 Task(
-  subagent_type: "general-purpose",
+  subagent_type: "swarm:dev-agent",
   description: "Fix integration issues for group <group>",
   prompt: """
-  You are a DevAgent. First cd to your working directory, then read your instructions:
-  cat ~/.claude/skills/swarm-developer-guide/SKILL.md
-
   Phase: I-<group> (integration fix)
   Branch: fix-integration-<group>
   Plan file: <full-path-to-plan-file>
