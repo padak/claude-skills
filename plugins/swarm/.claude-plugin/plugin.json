@@ -1,8 +1,8 @@
 {
-  "name": "swarm",
-  "description": "Multi-agent orchestration using Tech Lead + DevAgent pattern with git worktrees",
-  "version": "1.0.0",
-  "author": {
-    "name": "chocho"
-  }
+	"name": "swarm",
+	"description": "Multi-agent orchestration using Tech Lead + DevAgent pattern with git worktrees",
+	"version": "1.1.0",
+	"author": {
+		"name": "chocho"
+	}
 }

@@ -1,7 +1,7 @@
 ---
 name: swarm
 description: Orchestrates multi-agent implementation using Tech Lead + DevAgent pattern. Parses phased plans, builds dependency graphs, spawns DevAgents per phase with automatic parallelization via git worktrees when safe. Reviews PRs rigorously, handles retries with escalation. Use when the user has a phased implementation plan and wants to execute it with parallel agents.
-version: 1.0.0
+version: 1.1.0
 argument-hint: "[init | <plan-file>]"
 ---
 
