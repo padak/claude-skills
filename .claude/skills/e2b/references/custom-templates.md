@@ -5,15 +5,22 @@ Custom templates allow you to create pre-configured sandbox environments with pr
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Build System 2.0 vs Legacy](#build-system-20-vs-legacy)
-3. [When to Use Custom Templates](#when-to-use-custom-templates)
-4. [Build System 2.0 (Recommended)](#build-system-20-recommended)
-5. [Installing Packages](#installing-packages)
-6. [Template Configuration](#template-configuration)
-7. [How Templates Work](#how-templates-work)
-8. [Examples](#examples)
-9. [Best Practices](#best-practices)
-10. [Troubleshooting](#troubleshooting)
+2. [Build System 2.0 (Recommended)](#build-system-20-recommended)
+3. [Defining a Template](#defining-a-template)
+4. [Base Images](#base-images)
+5. [Template Builder Methods](#template-builder-methods)
+6. [Start and Ready Commands](#start-and-ready-commands)
+7. [Building Templates](#building-templates)
+8. [Tags and Versioning](#tags-and-versioning)
+9. [Layer Caching](#layer-caching)
+10. [Template Names](#template-names)
+11. [Build Logging](#build-logging)
+12. [Error Handling](#error-handling)
+13. [Private Registries](#private-registries)
+14. [Migration from Legacy System](#migration-from-legacy-system)
+15. [Examples](#examples)
+16. [Best Practices](#best-practices)
+17. [Troubleshooting](#troubleshooting)
 
 ## Overview
 
@@ -21,59 +28,51 @@ Custom templates allow you to create pre-configured sandbox environments with pr
 
 Templates are pre-configured sandbox snapshots that include:
 
-- **Pre-installed packages** - Python packages (pip), Node.js packages (npm), system packages (apt)
+- **Pre-installed packages** - Python packages (pip), Node.js packages (npm), Bun packages, system packages (apt)
 - **Running services** - Pre-started servers, databases, or background processes
 - **Custom configurations** - Environment variables, file system setup, runtime settings
 - **Resource allocation** - Custom CPU and RAM configurations
 
 Templates enable:
-- **Fast sandbox startup** - Load pre-configured environments in ~300ms
+- **Fast sandbox startup** - Load pre-configured environments in ~80ms
 - **Consistent environments** - Same configuration across all sandbox instances
 - **Reduced runtime overhead** - No package installation delays during execution
 - **Complex setups** - Pre-configured development environments with multiple services
 
-### Build System 2.0 vs Legacy
+### How Templates Work
 
-E2B offers two template building systems:
+Every time you build a sandbox template:
+1. A container is created based on the definition
+2. The container's filesystem is extracted, provisioned, and configured
+3. Layer commands are executed (install packages, copy files, run commands)
+4. If a start command is specified, it executes and the system waits for readiness
+5. The sandbox is snapshotted (filesystem + all running processes serialized)
+6. The snapshot becomes your template, loadable in ~80ms with everything running
 
-| Feature | Build System 2.0 (Recommended) | Legacy System |
-|---------|-------------------------------|---------------|
-| **Method** | SDK programmatic API | CLI with Dockerfiles |
-| **Configuration** | TypeScript/JavaScript code | `e2b.toml` + Dockerfile |
-| **Package Installation** | `.pipInstall()`, `.npmInstall()` | Manual in Dockerfile |
-| **Ease of Use** | High - fluent API | Medium - requires Docker knowledge |
-| **Documentation** | Current | Deprecated |
-| **Status** | Active development | Maintenance only |
+### Default User and Workdir
 
-**Recommendation:** Use Build System 2.0 for all new templates. Legacy system is maintained for backward compatibility.
+- **Default user:** `user` (non-root, different from Docker's default `root`)
+- **Default workdir:** `/home/user` (the user's home directory)
+- The last set user and workdir in the template definition persist as defaults for sandbox execution
 
-### When to Use Custom Templates
+### Kernel
 
-**Use custom templates when:**
-
-✅ You need the same packages across multiple sandbox instances
-✅ Package installation takes significant time (>5 seconds)
-✅ You want to pre-start services (databases, web servers)
-✅ You need specific CPU/RAM configurations
-✅ You want to minimize user wait times
-
-**Use runtime installation when:**
-
-❌ Packages are only needed once or occasionally
-❌ You're prototyping or testing
-❌ Package requirements change frequently
-❌ Installation is very fast (<2 seconds)
+E2B sandboxes run on an LTS 6.1 Linux kernel. The kernel version is fixed at template build time. Templates built on or after 27.11.2025 use kernel 6.1.158. Older templates use 6.1.102. To use a newer kernel, rebuild the template.
 
 ## Build System 2.0 (Recommended)
 
-### Using SDK Programmatically
+Build System 2.0 uses a fluent programmatic API (TypeScript/Python) to define and build templates. This is the recommended approach for all new templates.
 
-Build System 2.0 uses a fluent API to define and build templates programmatically.
+### Quickstart
 
 #### 1. Install E2B SDK
 
 ```bash
+# TypeScript
 npm install e2b dotenv
+
+# Python
+pip install e2b dotenv
 ```
 
 Create a `.env` file:
@@ -84,717 +83,1502 @@ E2B_API_KEY=e2b_***
 
 #### 2. Define Your Template
 
-Create `template.ts` with your configuration:
-
 ```typescript
 // template.ts
-import { Template } from "e2b";
+import { Template, waitForTimeout } from 'e2b';
 
 export const template = Template()
-  .fromTemplate("code-interpreter-v1")  // Base template
-  .pipInstall(['pandas', 'numpy', 'matplotlib'])  // Python packages
-  .npmInstall(['express', 'axios'])  // Node.js packages
+  .fromBaseImage()
+  .setEnvs({
+    HELLO: "Hello, World!",
+  })
+  .setStartCmd("echo $HELLO", waitForTimeout(5_000));
 ```
 
-#### 3. Create Build Script
+```python
+# template.py
+from e2b import Template, wait_for_timeout
 
-Create `build.prod.ts`:
+template = (
+    Template()
+    .from_base_image()
+    .set_envs(
+        {
+            "HELLO": "Hello, World!",
+        }
+    )
+    .set_start_cmd("echo $HELLO", wait_for_timeout(5_000)))
+```
+
+#### 3. Create Build Scripts
+
+Development build script:
 
 ```typescript
-// build.prod.ts
-import "dotenv/config";
-import { Template, defaultBuildLogger } from "e2b";
-import { template } from "./template";
+// build.dev.ts
+import 'dotenv/config';
+import { Template, defaultBuildLogger } from 'e2b';
+import { template } from './template';
 
 async function main() {
-  await Template.build(template, {
-    alias: "my-custom-template",  // Template name/alias
-    cpuCount: 2,                  // CPU cores
-    memoryMB: 2048,               // RAM in MB
-    onBuildLogs: defaultBuildLogger(),  // Show build logs
+  await Template.build(template, 'template-tag-dev', {
+    cpuCount: 1,
+    memoryMB: 1024,
+    onBuildLogs: defaultBuildLogger(),
   });
 }
 
 main().catch(console.error);
+```
+
+```python
+# build_dev.py
+from dotenv import load_dotenv
+from e2b import Template, default_build_logger
+from template import template
+
+load_dotenv()
+
+if __name__ == '__main__':
+    Template.build(
+        template,
+        'template-tag-dev',
+        cpu_count=1,
+        memory_mb=1024,
+        on_build_logs=default_build_logger(),
+    )
+```
+
+Production build script:
+
+```typescript
+// build.prod.ts
+import 'dotenv/config';
+import { Template, defaultBuildLogger } from 'e2b';
+import { template } from './template';
+
+async function main() {
+  await Template.build(template, 'template-tag', {
+    cpuCount: 1,
+    memoryMB: 1024,
+    onBuildLogs: defaultBuildLogger(),
+  });
+}
+
+main().catch(console.error);
+```
+
+```python
+# build_prod.py
+from dotenv import load_dotenv
+from e2b import Template, default_build_logger
+from template import template
+
+load_dotenv()
+
+if __name__ == '__main__':
+    Template.build(
+        template,
+        'template-tag',
+        cpu_count=1,
+        memory_mb=1024,
+        on_build_logs=default_build_logger(),
+    )
 ```
 
 #### 4. Build the Template
 
 ```bash
-npx tsx build.prod.ts
-```
+# TypeScript - Development
+npx tsx build.dev.ts
 
-The build process will:
-1. Create a base container
-2. Install specified packages
-3. Execute any start commands
-4. Wait for readiness
-5. Create a snapshot
-6. Register the template with your alias
+# TypeScript - Production
+npx tsx build.prod.ts
+
+# Python - Development
+python build_dev.py
+
+# Python - Production
+python build_prod.py
+```
 
 #### 5. Use Your Custom Template
 
 ```typescript
-import { Sandbox } from 'e2b'
+import 'dotenv/config';
+import { Sandbox } from 'e2b';
 
-// Create sandbox from your custom template
-const sbx = await Sandbox.create("my-custom-template")
+// Create a Sandbox from development template
+const sandbox = await Sandbox.create("template-tag-dev");
 
-// Packages are already installed and ready
-const result = await sbx.runCode(`
-  import pandas as pd
-  import numpy as np
-  print("Packages ready!")
-`)
+// Create a Sandbox from production template
+const sandbox = await Sandbox.create("template-tag");
 ```
 
-### Template Configuration Options
+```python
+from dotenv import load_dotenv
+from e2b import Sandbox
 
-#### Base Templates
+load_dotenv()
 
-Start from pre-configured base templates:
+# Create a new Sandbox from the development template
+sbx = Sandbox(template="template-tag-dev")
 
-```typescript
-// Code interpreter (Python, Node.js, Bash)
-Template().fromTemplate("code-interpreter-v1")
-
-// Custom base template
-Template().fromTemplate("your-base-template-id")
+# Create a new Sandbox from the production template
+sbx = Sandbox(template="template-tag")
 ```
 
-#### Package Installation
+## Defining a Template
+
+### Template Constructor Options
+
+When creating a template, you can specify file context options:
 
 ```typescript
-const template = Template()
-  .fromTemplate("code-interpreter-v1")
-
-  // Python packages
-  .pipInstall(['pandas', 'scikit-learn', 'requests'])
-
-  // Node.js packages
-  .npmInstall(['express', 'lodash', 'axios'])
-
-  // System packages (requires custom Dockerfile)
-  // See Legacy System section for apt-get packages
-```
-
-#### CPU and RAM Customization
-
-Configure resources during build:
-
-```typescript
-await Template.build(template, {
-  alias: "high-memory-template",
-  cpuCount: 4,      // 1-8 CPU cores
-  memoryMB: 8192,   // RAM in megabytes (512-16384)
-  onBuildLogs: defaultBuildLogger(),
+const template = Template({
+  fileContextPath: ".",  // Custom file context path
+  fileIgnorePatterns: [".git", "node_modules"],  // File patterns to ignore
 });
 ```
 
-**Resource Limits:**
-- CPU: 1-8 cores
-- RAM: 512 MB - 16 GB (512-16384 MB)
+```python
+template = Template(
+    file_context_path=".",  # Custom file context path
+    file_ignore_patterns=[".git", "node_modules"],  # File patterns to ignore
+)
+```
 
-**Recommendations:**
-- **Light workloads:** 1 CPU, 512-1024 MB
-- **Standard workloads:** 2 CPUs, 2048 MB
-- **Heavy workloads:** 4+ CPUs, 4096+ MB
+The SDK automatically reads `.dockerignore` files and combines them with your ignore patterns. Files matching these patterns are excluded from uploads and hash calculations.
 
-## Installing Packages
+### Method Chaining
 
-There are two approaches to package installation in E2B sandboxes:
-
-1. **Template-based (build time)** - Packages pre-installed in template
-2. **Runtime installation** - Install packages when sandbox is running
-
-### Template-Based Installation (Recommended)
-
-Pre-install packages in your template for faster sandbox startup.
-
-#### Python Packages (pip)
+All template methods return the template instance, allowing for fluent API usage:
 
 ```typescript
 const template = Template()
-  .fromTemplate("code-interpreter-v1")
-  .pipInstall([
-    'pandas',
-    'numpy',
-    'matplotlib',
-    'scikit-learn',
-    'requests'
-  ])
+  .fromUbuntuImage("22.04")
+  .aptInstall(["curl"])
+  .setWorkdir('/app')
+  .copy("package.json", "/app/package.json")
+  .runCmd("npm install")
+  .setStartCmd("npm start", waitForPort(3000));
 ```
 
-**Use case:** Common data science libraries that don't change often
+```python
+template = (
+    Template()
+    .from_ubuntu_image("22.04")
+    .set_workdir("/app")
+    .copy("package.json", "/app/package.json")
+    .run_cmd("npm install")
+    .set_start_cmd("npm start", wait_for_timeout(10_000)))
+```
 
-#### Node.js Packages (npm)
+## Base Images
+
+Every template starts with a base image. You can only call a base image method once per template.
+
+### Predefined Base Images
+
+Convenience methods for common base images:
 
 ```typescript
+template.fromUbuntuImage("22.04");       // ubuntu:22.04
+template.fromDebianImage("stable-slim"); // debian:stable-slim
+template.fromPythonImage("3.13");        // python:3.13
+template.fromNodeImage("lts");           // node:lts
+template.fromBunImage("1.3");            // oven/bun:1.3
+```
+
+```python
+template.from_ubuntu_image("22.04")       # ubuntu:22.04
+template.from_debian_image("stable-slim") # debian:stable-slim
+template.from_python_image("3.13")        # python:3.13
+template.from_node_image("lts")           # node:lts
+template.from_bun_image("1.3")            # oven/bun:1.3
+```
+
+### Default E2B Base Image
+
+Pre-configured for sandbox environments:
+
+```typescript
+template.fromBaseImage(); // e2bdev/base
+```
+
+```python
+template.from_base_image()  # e2bdev/base
+```
+
+### Custom Docker Image
+
+Use any Docker image from Docker Hub or other registries:
+
+```typescript
+template.fromImage("custom-image:latest");
+```
+
+```python
+template.from_image("custom-image:latest")
+```
+
+### Build from Existing Template
+
+Extend an existing template from your team or organization:
+
+```typescript
+template.fromTemplate("my-template");           // Your team's template
+template.fromTemplate("acme/other-template");   // Full namespaced reference
+```
+
+```python
+template.from_template("my-template")           # Your team's template
+template.from_template("acme/other-template")   # Full namespaced reference
+```
+
+### Parse Existing Dockerfile
+
+Convert existing Dockerfiles to template format using `fromDockerfile()`:
+
+```typescript
+const dockerfileContent = `
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y curl
+WORKDIR /app
+COPY . .
+ENV NODE_ENV=production
+ENV PORT=3000
+USER appuser`;
+
 const template = Template()
-  .fromTemplate("code-interpreter-v1")
-  .npmInstall([
-    'express',
-    'axios',
-    'lodash',
-    'moment'
-  ])
+  .fromDockerfile(dockerfileContent)
+  .setStartCmd("npm start", waitForTimeout(5_000));
 ```
 
-**Use case:** Web server dependencies, utility libraries
+```python
+dockerfile_content = """
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y curl
+WORKDIR /app
+COPY . .
+ENV NODE_ENV=production
+ENV PORT=3000
+USER appuser
+"""
 
-#### System Packages (Legacy System Only)
-
-For system packages like `curl`, `git`, `postgresql-client`, you need to use the legacy Dockerfile approach:
-
-**e2b.Dockerfile:**
-```dockerfile
-FROM e2bdev/code-interpreter:latest
-
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+template = (
+    Template()
+    .from_dockerfile(dockerfile_content)
+    .set_start_cmd("npm start", wait_for_timeout(5_000))
+)
 ```
 
-**Build with CLI:**
-```bash
-e2b template build --dockerfile e2b.Dockerfile --name system-tools
-```
+**Supported Dockerfile instructions:**
 
-### Runtime Installation
+| Instruction | Supported | Behavior |
+|-------------|-----------|----------|
+| `FROM` | Yes | Sets base image |
+| `RUN` | Yes | Converts to `runCmd()` / `run_cmd()` |
+| `COPY` / `ADD` | Yes | Converts to `copy()` |
+| `WORKDIR` | Yes | Converts to `setWorkdir()` / `set_workdir()` |
+| `USER` | Yes | Converts to `setUser()` / `set_user()` |
+| `ENV` | Yes | Converts to `setEnvs()` / `set_envs()` (both `ENV key=value` and `ENV key value` formats) |
+| `CMD` / `ENTRYPOINT` | Yes | Converts to `setStartCmd()` / `set_start_cmd()` with 20s timeout as ready command |
+| `EXPOSE` | No | Skipped |
+| `VOLUME` | No | Skipped |
 
-Install packages dynamically when the sandbox is running.
+Multi-stage Dockerfiles are NOT supported.
 
-**Advantages:**
-- No template rebuild needed
-- Flexible for changing requirements
-- Good for prototyping
+## Template Builder Methods
 
-**Disadvantages:**
-- Increases sandbox startup time
-- Installation time on every sandbox instance
-- No caching across instances
+### Complete Method Reference
 
-#### Python Packages
+| Method (TypeScript) | Method (Python) | Description |
+|---------------------|-----------------|-------------|
+| `fromUbuntuImage(tag)` | `from_ubuntu_image(tag)` | Start from Ubuntu base image |
+| `fromDebianImage(tag)` | `from_debian_image(tag)` | Start from Debian base image |
+| `fromPythonImage(tag)` | `from_python_image(tag)` | Start from Python base image |
+| `fromNodeImage(tag)` | `from_node_image(tag)` | Start from Node.js base image |
+| `fromBunImage(tag)` | `from_bun_image(tag)` | Start from Bun base image |
+| `fromImage(image)` | `from_image(image)` | Start from any Docker image |
+| `fromBaseImage()` | `from_base_image()` | Start from default E2B base image |
+| `fromTemplate(name)` | `from_template(name)` | Extend an existing template |
+| `fromDockerfile(content)` | `from_dockerfile(content)` | Parse a Dockerfile string |
+| `aptInstall(packages)` | `apt_install(packages)` | Install system packages (auto runs apt update) |
+| `pipInstall(packages, opts?)` | `pip_install(packages, **opts)` | Install Python packages |
+| `npmInstall(packages, opts?)` | `npm_install(packages, **opts)` | Install Node.js packages |
+| `bunInstall(packages, opts?)` | `bun_install(packages, **opts)` | Install Bun packages |
+| `gitClone(url, path?, opts?)` | `git_clone(url, path?, **opts)` | Clone a git repository |
+| `copy(src, dest, opts?)` | `copy(src, dest, **opts)` | Copy files from local filesystem |
+| `copyItems(items)` | `copy_items(items)` | Copy multiple file mappings |
+| `remove(path, opts?)` | `remove(path, **opts)` | Remove files or directories |
+| `rename(old, new, opts?)` | `rename(old, new, **opts)` | Rename files or directories |
+| `makeDir(path, opts?)` | `make_dir(path, **opts)` | Create directories |
+| `makeSymlink(target, link)` | `make_symlink(target, link)` | Create symbolic links |
+| `runCmd(cmd, opts?)` | `run_cmd(cmd, **opts)` | Execute shell commands |
+| `setEnvs(envs)` | `set_envs(envs)` | Set environment variables (build-time only) |
+| `setStartCmd(cmd, readyCmd)` | `set_start_cmd(cmd, ready_cmd)` | Set startup command with readiness check |
+| `setWorkdir(path)` | `set_workdir(path)` | Set working directory |
+| `setUser(user)` | `set_user(user)` | Set the user for subsequent commands |
+| `skipCache()` | `skip_cache()` | Invalidate cache from this point forward |
+
+### Installing Packages
 
 ```typescript
-import { Sandbox } from '@e2b/code-interpreter'
+// System packages (automatically runs apt update)
+template.aptInstall(['curl', 'wget', 'git'])
 
-const sbx = await Sandbox.create()
+// Python packages (global by default)
+template.pipInstall(['requests', 'pandas', 'numpy'])
 
-// Install package at runtime
-await sbx.commands.run('pip install cowsay')
+// Python packages (user install)
+template.pipInstall(['requests', 'pandas', 'numpy'], { g: false })
 
-// Use immediately
-await sbx.runCode(`
-  import cowsay
-  cowsay.cow("Hello, world!")
-`)
+// Node.js packages (local by default)
+template.npmInstall(['express', 'lodash'])
+
+// Node.js packages (global)
+template.npmInstall(['express', 'lodash'], { g: true })
+
+// Bun packages (local by default)
+template.bunInstall(['express', 'lodash'])
+
+// Bun packages (global)
+template.bunInstall(['express', 'lodash'], { g: true })
 ```
 
-#### Node.js Packages
+```python
+# System packages (automatically runs apt update)
+template.apt_install(["curl", "wget", "git"])
+
+# Python packages (global by default)
+template.pip_install(["requests", "pandas", "numpy"])
+
+# Python packages (user install)
+template.pip_install(["requests", "pandas", "numpy"], g=False)
+
+# Node.js packages (local by default)
+template.npm_install(["express", "lodash"])
+
+# Node.js packages (global)
+template.npm_install(["express", "lodash"], g=True)
+
+# Bun packages (local by default)
+template.bun_install(["express", "lodash"])
+
+# Bun packages (global)
+template.bun_install(["express", "lodash"], g=True)
+```
+
+### Copying Files
 
 ```typescript
-import { Sandbox } from '@e2b/code-interpreter'
+// Copy a single file
+template.copy("package.json", "/app/package.json");
 
-const sbx = await Sandbox.create()
+// Copy multiple files to same destination
+template.copy(["file1", "file2"], "/app/file")
 
-// Install package at runtime
-await sbx.commands.run('npm install cowsay')
+// Multiple copy operations using copyItems
+template.copyItems([
+  { src: "src/", dest: "/app/src/" },
+  { src: "package.json", dest: "/app/package.json" },
+]);
 
-// Use immediately
-await sbx.runCode(`
-  const cowsay = require('cowsay')
-  console.log(cowsay.say({ text: 'Hello, world!' }))
-`, { language: 'javascript' })
+// Copy with user and mode options
+template.copy("config.json", "/app/config.json", {
+  user: "appuser",
+  mode: 0o644,
+});
+
+// Force upload (invalidates file cache)
+template.copy("config.json", "/app/config.json", { forceUpload: true });
 ```
 
-#### System Packages
+```python
+# Copy a single file
+template.copy("package.json", "/app/package.json")
+
+# Copy multiple files to the same destination
+template.copy(["file1", "file2"], "/app/file")
+
+# Multiple copy operations using copy_items
+template.copy_items([
+    {"src": "src/", "dest": "/app/src/"},
+    {"src": "package.json", "dest": "/app/package.json"},
+])
+
+# Copy with user and mode options
+template.copy("config.json", "/app/config.json", user="appuser", mode=0o644)
+
+# Force upload (invalidates file cache)
+template.copy("config.json", "/app/config.json", force_upload=True)
+```
+
+### File Operations
 
 ```typescript
-const sbx = await Sandbox.create()
+// Remove files or directories
+template.remove("/tmp/temp-file.txt");
+template.remove("/old-directory", { recursive: true });
+template.remove("/file.txt", { force: true });
 
-// Update package list and install
-await sbx.commands.run('apt-get update && apt-get install -y curl git')
+// Rename files or directories
+template.rename("/old-name.txt", "/new-name.txt");
+template.rename("/old-dir", "/new-dir", { force: true });
 
-// Use immediately
-await sbx.commands.run('curl --version')
+// Create directories
+template.makeDir("/app/logs");
+template.makeDir("/app/data", { mode: 0o755 });
+
+// Create symbolic links
+template.makeSymlink("/app/data", "/app/logs/data");
 ```
 
-**Note:** E2B sandboxes are Debian-based, so you can use any Debian-supported package manager.
+```python
+# Remove files or directories
+template.remove("/tmp/old-file")
+template.remove("/tmp/old-dir", recursive=True)
+template.remove("/tmp/file", force=True)
 
-### When to Use Each Approach
+# Rename files or directories
+template.rename("/old/path", "/new/path")
+template.rename("/old/path", "/new/path", force=True)
 
-| Scenario | Template-Based | Runtime |
-|----------|---------------|---------|
-| Same packages every time | ✅ Yes | ❌ No |
-| Changing requirements | ❌ No | ✅ Yes |
-| Long installation time | ✅ Yes | ❌ No |
-| Quick prototyping | ❌ No | ✅ Yes |
-| Production use | ✅ Yes | ⚠️ Maybe |
+# Create directories
+template.make_dir("/app/data")
+template.make_dir("/app/data", mode=0o755)
 
-## Template Configuration
-
-### Legacy System: e2b.toml Format
-
-The legacy build system uses `e2b.toml` for configuration.
-
-**Basic e2b.toml:**
-```toml
-# This is a config for E2B sandbox template
-template_id = "1wdqsf9le9gk21ztb4mo"
-dockerfile = "e2b.Dockerfile"
-template_name = "my-agent-sandbox"
-start_cmd = "/root/.jupyter/start-up.sh"
-ready_cmd = 'curl -s -o /dev/null -w "%{http_code}" http://localhost:8888 | grep -q "200"'
+# Create symbolic links
+template.make_symlink("/path/to/target", "/path/to/link")
 ```
 
-**Configuration Options:**
+### Git Operations
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `template_id` | string | Unique template identifier |
-| `dockerfile` | string | Path to Dockerfile (default: `e2b.Dockerfile`) |
-| `template_name` | string | Human-readable template name |
-| `start_cmd` | string | Command to run at startup |
-| `ready_cmd` | string | Command to check readiness |
+Requires `git` to be installed in the template:
 
-### Start Commands
+```typescript
+// Clone a repository
+template.gitClone('https://github.com/user/repo.git')
 
-Start commands run automatically when your sandbox is created, allowing you to:
-- Pre-start web servers
-- Initialize databases
-- Run background processes
-- Set up development environments
+// Clone to a specific path
+template.gitClone('https://github.com/user/repo.git', '/app/repo')
 
-#### How Start Commands Work
+// Clone a specific branch
+template.gitClone('https://github.com/user/repo.git', '/app/repo', {
+  branch: 'main',
+})
 
-1. Template builds with base configuration
-2. Start command executes in the container
-3. System waits for readiness (ready command)
-4. Snapshot is created with the running process
-5. New sandboxes spawn with the process already running
-
-#### Defining Start Commands
-
-**Build System 2.0 (not yet supported):**
-Currently, Build System 2.0 doesn't support start commands directly. Use legacy system for this feature.
-
-**Legacy System (e2b.toml):**
-```toml
-start_cmd = "/root/.jupyter/start-up.sh"
+// Shallow clone with depth limit
+template.gitClone('https://github.com/user/repo.git', '/app/repo', {
+  depth: 1,
+})
 ```
 
-**Legacy System (CLI):**
-```bash
-e2b template build -c "/root/.jupyter/start-up.sh"
+```python
+# Clone a repository
+template.git_clone("https://github.com/user/repo.git")
+
+# Clone to a specific path
+template.git_clone("https://github.com/user/repo.git", "/app/repo")
+
+# Clone a specific branch
+template.git_clone("https://github.com/user/repo.git", "/app/repo", branch="main")
+
+# Shallow clone with depth limit
+template.git_clone("https://github.com/user/repo.git", "/app/repo", depth=1)
 ```
 
-#### Example: Pre-start Jupyter Server
+### Running Commands
 
-**start-jupyter.sh:**
-```bash
-#!/bin/bash
-jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+```typescript
+// Run a single command
+template.runCmd('apt-get update && apt-get install -y curl')
+
+// Run multiple commands
+template.runCmd(['apt-get update', 'apt-get install -y curl', 'curl --version'])
+
+// Run commands as a specific user
+template.runCmd('npm install', { user: 'node' })
 ```
 
-**e2b.toml:**
-```toml
-template_id = "jupyter-ready"
-template_name = "jupyter-prestarted"
-start_cmd = "/root/start-jupyter.sh"
-ready_cmd = 'curl -s http://localhost:8888 > /dev/null'
-```
+```python
+# Run a single command
+template.run_cmd("apt-get update && apt-get install -y curl")
 
-When you create a sandbox from this template, Jupyter is already running.
+# Run multiple commands
+template.run_cmd(["apt-get update", "apt-get install -y curl", "curl --version"])
 
-#### Retrieving Start Command Logs
-
-```bash
-e2b sandbox logs <sandbox-id>
-```
-
-Logs include output from the start command during the build phase.
-
-### Readiness Checks
-
-Readiness commands determine when a template sandbox is ready for snapshotting.
-
-#### How Readiness Works
-
-1. Start command begins execution
-2. Readiness command runs in an infinite loop
-3. Exits when ready command returns **exit code 0**
-4. Snapshot is created once ready
-
-#### Defining Ready Commands
-
-**e2b.toml:**
-```toml
-ready_cmd = 'curl -s http://localhost:3000 > /dev/null'
-```
-
-**CLI:**
-```bash
-e2b template build --ready-cmd 'curl -s http://localhost:3000 > /dev/null'
-```
-
-#### Default Behavior
-
-- **No start command:** `sleep 0` (immediately ready)
-- **With start command:** `sleep 20` (wait 20 seconds)
-
-#### Examples
-
-**Wait for HTTP server (200 status):**
-```toml
-ready_cmd = 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200"'
-```
-
-**Wait for specific process:**
-```toml
-ready_cmd = 'pgrep my-process-name > /dev/null'
-```
-
-**Wait for file to exist:**
-```toml
-ready_cmd = '[ -f /tmp/ready.flag ]'
-```
-
-**Wait for PostgreSQL:**
-```toml
-ready_cmd = 'pg_isready -h localhost -p 5432'
-```
-
-**Wait for port to be open:**
-```toml
-ready_cmd = 'nc -z localhost 3000'
+# Run command as specific user
+template.run_cmd("npm install", user="node")
 ```
 
 ### Environment Variables
 
-You can access template metadata via environment variables in sandboxes.
+Environment variables set in the template definition are only available during template build, NOT at sandbox runtime. Use sandbox environment variables for runtime configuration.
 
-**Default environment variables:**
-- `E2B_SANDBOX` - Set to `true` (indicates running in E2B)
-- `E2B_SANDBOX_ID` - Sandbox instance ID
-- `E2B_TEAM_ID` - Your E2B team ID
-- `E2B_TEMPLATE_ID` - Template ID used for this sandbox
-
-**Example:**
 ```typescript
-const sandbox = await Sandbox.create()
-const result = await sandbox.commands.run('echo $E2B_TEMPLATE_ID')
-console.log(result.stdout) // Prints template ID
+template.setEnvs({
+  NODE_ENV: 'production',
+  API_KEY: 'your-api-key',
+  DEBUG: 'true',
+})
 ```
 
-**CLI access (as files):**
+```python
+template.set_envs({
+    "NODE_ENV": "production",
+    "API_KEY": "your-api-key",
+    "DEBUG": "true",
+})
+```
+
+### User and Working Directory
+
+```typescript
+// Set working directory
+template.setWorkdir("/app");
+
+// Set user (runs subsequent commands as this user)
+template.setUser('node')
+template.setUser("1000:1000"); // User ID and group ID
+```
+
+```python
+# Set working directory
+template.set_workdir("/app")
+
+# Set user (runs subsequent commands as this user)
+template.set_user("node")
+template.set_user("1000:1000")  # User ID and group ID
+```
+
+The last set user and workdir persist to the sandbox:
+
+```typescript
+const template = Template()
+  .fromBaseImage()
+  .runCmd("whoami") // user
+  .runCmd("pwd")    // /home/user
+  .setUser("guest")
+  .runCmd("whoami") // guest
+  .runCmd("pwd")    // /home/guest
+
+// After build, sandbox will default to user "guest" with workdir "/home/guest"
+```
+
+## Start and Ready Commands
+
+### Start Command
+
+The start command specifies a process that will be **already running** when you spawn the sandbox. Use it for servers, databases, or background processes that should be ready with zero wait time.
+
+### Ready Command
+
+The ready command determines when the template sandbox is ready for snapshotting. It runs in an infinite loop until it returns exit code 0.
+
+### Usage
+
+```typescript
+// Set start command with a port-based ready check
+template.setStartCmd('npm start', waitForPort(3000))
+
+// Set start command with a custom ready command string
+template.setStartCmd('npm start', 'curl -s -o /dev/null -w "200"')
+
+// Set only a ready command (no start command)
+template.setReadyCmd(waitForTimeout(10_000))
+```
+
+```python
+# Set start command with a port-based ready check
+template.set_start_cmd("npm start", wait_for_port(3000))
+
+# Set start command with a custom ready command string
+template.set_start_cmd("npm start", 'curl -s -o /dev/null -w "200"')
+
+# Set only a ready command (no start command)
+template.set_ready_cmd(wait_for_timeout(10_000))
+```
+
+### Ready Command Helpers
+
+The SDK provides helper functions for common readiness patterns:
+
+```typescript
+import {
+  waitForPort,
+  waitForProcess,
+  waitForFile,
+  waitForTimeout,
+  waitForURL,
+} from 'e2b'
+
+waitForPort(3000)            // Wait for a port to be available
+waitForProcess('node')       // Wait for a process to be running
+waitForFile('/tmp/ready')    // Wait for a file to exist
+waitForTimeout(10_000)       // Wait for a specified duration (ms)
+waitForURL('http://localhost:3000')  // Wait for a URL to respond
+```
+
+```python
+from e2b import wait_for_port, wait_for_process, wait_for_file, wait_for_timeout, wait_for_url
+
+wait_for_port(3000)            # Wait for a port to be available
+wait_for_process("node")       # Wait for a process to be running
+wait_for_file("/tmp/ready")    # Wait for a file to exist
+wait_for_timeout(10_000)       # Wait for a specified duration (ms)
+wait_for_url('http://localhost:3000')  # Wait for a URL to respond
+```
+
+## Building Templates
+
+### Build and Wait for Completion
+
+The `build` method builds the template and waits for the build to complete. Returns build information including the template ID and build ID.
+
+```typescript
+const buildInfo = await Template.build(template, 'my-template', {
+  cpuCount: 2,                         // CPU cores
+  memoryMB: 2048,                      // Memory in MB
+  skipCache: false,                    // Skip cache (except for files)
+  onBuildLogs: defaultBuildLogger(),   // Log callback
+  apiKey: 'your-api-key',             // Override API key
+  domain: 'your-domain',              // Override domain
+  tags: ['v1.0.0', 'latest'],         // Additional tags
+})
+// buildInfo contains: { name, templateId, buildId }
+```
+
+```python
+build_info = Template.build(
+    template,
+    'my-template',
+    cpu_count=2,                         # CPU cores
+    memory_mb=2048,                      # Memory in MB
+    skip_cache=False,                    # Skip cache (except for files)
+    on_build_logs=default_build_logger(),# Log callback
+    api_key="your-api-key",             # Override API key
+    domain="your-domain",               # Override domain
+    tags=['v1.0.0', 'latest'],          # Additional tags
+)
+# build_info contains: BuildInfo(name, template_id, build_id)
+```
+
+### Build in Background
+
+The `buildInBackground` method starts the build and returns immediately without waiting for completion:
+
+```typescript
+const buildInfo = await Template.buildInBackground(template, 'my-template', {
+  cpuCount: 2,
+  memoryMB: 2048,
+})
+// Returns immediately with: { name, templateId, buildId }
+```
+
+```python
+build_info = Template.build_in_background(
+    template,
+    'my-template',
+    cpu_count=2,
+    memory_mb=2048,
+)
+# Returns immediately with: BuildInfo(name, template_id, build_id)
+```
+
+### Check Build Status
+
+Use `getBuildStatus` to check the status of a background build:
+
+```typescript
+const status = await Template.getBuildStatus(buildInfo, {
+  logsOffset: 0,  // Optional: offset for fetching logs
+})
+// status contains: { status: 'building' | 'ready' | 'error', logEntries: [...] }
+```
+
+```python
+status = Template.get_build_status(
+    build_info,
+    logs_offset=0,  # Optional: offset for fetching logs
+)
+# status contains build status and logs
+```
+
+### Background Build with Polling
+
+```typescript
+// Start build in background
+const buildInfo = await Template.buildInBackground(template, 'my-template', {
+  cpuCount: 2,
+  memoryMB: 2048,
+})
+
+// Poll for build status
+let logsOffset = 0
+let status = 'building'
+
+while (status === 'building') {
+  const buildStatus = await Template.getBuildStatus(buildInfo, {
+    logsOffset,
+  })
+
+  logsOffset += buildStatus.logEntries.length
+  status = buildStatus.status
+
+  buildStatus.logEntries.forEach(
+    (logEntry) => console.log(logEntry.toString())
+  )
+
+  await new Promise(resolve => setTimeout(resolve, 2000))
+}
+
+if (status === 'ready') {
+  console.log('Build completed successfully')
+} else {
+  console.error('Build failed')
+}
+```
+
+```python
+import time
+
+# Start build in background
+build_info = Template.build_in_background(
+    template,
+    'my-template',
+    cpu_count=2,
+    memory_mb=2048,
+)
+
+# Poll for build status
+logs_offset = 0
+status = "building"
+
+while status == "building":
+    build_status = Template.get_build_status(
+        build_info,
+        logs_offset=logs_offset,
+    )
+
+    logs_offset += len(build_status.log_entries)
+    status = build_status.status.value
+
+    for log_entry in build_status.log_entries:
+        print(log_entry)
+
+    time.sleep(2)
+
+if status == "ready":
+    print("Build completed successfully")
+else:
+    print("Build failed")
+```
+
+### Check Name Availability
+
+```typescript
+const exists = await Template.exists('my-template')
+console.log(`Name ${exists ? 'is taken' : 'is available'}`)
+```
+
+```python
+exists = Template.exists('my-template')
+print(f"Name {'is taken' if exists else 'is available'}")
+```
+
+## Tags and Versioning
+
+Template versioning uses tags in the `name:tag` format. Tags allow you to maintain multiple versions of the same template.
+
+### The Default Tag
+
+When you build or reference a template without a tag, E2B uses the `default` tag automatically:
+
+```typescript
+// These are equivalent
+const sandbox1 = await Sandbox.create('my-template')
+const sandbox2 = await Sandbox.create('my-template:default')
+```
+
+```python
+# These are equivalent
+sandbox1 = Sandbox.create('my-template')
+sandbox2 = Sandbox.create('my-template:default')
+```
+
+### Building with Tags
+
+Single tag:
+
+```typescript
+await Template.build(template, 'my-template:v1.0.0')
+```
+
+```python
+Template.build(template, 'my-template:v1.0.0')
+```
+
+Multiple tags:
+
+```typescript
+await Template.build(template, 'my-template', { tags: ['v1.2.0', 'latest'] })
+```
+
+```python
+Template.build(template, 'my-template', tags=['v1.2.0', 'latest'])
+```
+
+### Assign Tags
+
+Assign new tags to an existing build without rebuilding (useful for promoting versions):
+
+```typescript
+// Assign a single tag
+await Template.assignTags('my-template:v1.2.0', 'production')
+
+// Assign multiple tags at once
+await Template.assignTags('my-template:v1.2.0', ['production', 'stable'])
+```
+
+```python
+# Assign a single tag
+Template.assign_tags('my-template:v1.2.0', 'production')
+
+# Assign multiple tags at once
+Template.assign_tags('my-template:v1.2.0', tags=['production', 'stable'])
+```
+
+### Remove Tags
+
+Remove a tag from a template. The underlying build artifact remains accessible via other tags.
+
+```typescript
+await Template.removeTags('my-template', 'staging')
+```
+
+```python
+Template.remove_tags('my-template', 'staging')
+```
+
+### Versioning Use Cases
+
+**Semantic versioning:**
+
+```typescript
+await Template.build(template, 'api-server:v1.0.0')
+await Template.build(template, 'api-server:v1.1.0')
+await Template.build(template, 'api-server:v2.0.0')
+
+// Create sandbox from specific version
+const sandbox = await Sandbox.create('api-server:v1.1.0')
+```
+
+**Environment-based tags:**
+
+```typescript
+// Build new version
+await Template.build(template, 'my-app:v1.5.0')
+
+// Promote through environments
+await Template.assignTags('my-app:v1.5.0', 'staging')
+
+// After testing, promote to production
+await Template.assignTags('my-app:v1.5.0', 'production')
+
+// Use in your application
+const env = process.env.NODE_ENV
+const sandbox = await Sandbox.create(`my-app:${env}`)
+```
+
+**Latest and stable rolling tags:**
+
+```typescript
+// Build with version and latest tag
+await Template.build(template, 'my-tool', { tags: ['v3.0.0', 'latest'] })
+
+// Mark a tested version as stable
+await Template.assignTags('my-tool:v2.9.0', 'stable')
+
+// Choose risk tolerance
+const latestSandbox = await Sandbox.create('my-tool:latest')   // Newest
+const stableSandbox = await Sandbox.create('my-tool:stable')   // Tested
+```
+
+## Layer Caching
+
+E2B uses a layer caching system similar to Docker. For each layer command (`.copy()`, `.runCmd()`, `.setEnvs()`, etc.), a new layer is created. If a layer command is unchanged and its inputs are the same as any previous build, the cached layer is reused.
+
+Cache is scoped to the team -- multiple templates can share cached layers if they have identical layers.
+
+### Partial Cache Invalidation
+
+Force rebuild from a specific point using `skipCache()`:
+
+```typescript
+const template = Template()
+  .fromBaseImage()
+  .skipCache()  // Everything after this will be rebuilt
+  .runCmd("echo 'Hello, World!'")
+```
+
+```python
+template = (
+    Template()
+    .from_base_image()
+    .skip_cache()  # Everything after this will be rebuilt
+    .run_cmd("echo 'Hello, World!'")
+)
+```
+
+### Full Template Cache Skip
+
+Skip cache for the entire build:
+
+```typescript
+Template.build(template, 'my-template', {
+  skipCache: true,  // Skip cache (except for files)
+})
+```
+
+```python
+Template.build(
+    template,
+    'my-template',
+    skip_cache=True,  # Skip cache (except for files)
+)
+```
+
+### File Caching
+
+When using `.copy()`, files are cached based on their content. Even if you invalidate a layer before `.copy()`, already uploaded files are reused. To force re-upload files, use `forceUpload`:
+
+```typescript
+template.copy("config.json", "/app/config.json", { forceUpload: true })
+```
+
+```python
+template.copy("config.json", "/app/config.json", force_upload=True)
+```
+
+### Leveraging Cache for Variants
+
+Build the same template with different CPU/RAM while reusing common layers:
+
+```typescript
+// Same template definition, different configurations
+await Template.build(template, 'my-template-2cpu-2gb', { cpuCount: 2, memoryMB: 2048 })
+await Template.build(template, 'my-template-1cpu-4gb', { cpuCount: 1, memoryMB: 4096 })
+// Second build reuses all cached layers
+```
+
+### Optimizing Build Times
+
+Place frequently changing commands towards the end of your template definition so earlier layers can be cached and reused more often.
+
+## Template Names
+
+Template names are unique identifiers scoped to your team:
+
+- Your template named `my-app` is stored as `your-team-slug/my-app`
+- Reference it simply as `my-app` within your team
+- Other teams can have their own `my-app` without conflict
+- Public templates should use full namespaced format (`team-slug/template-name`)
+
+Existing public templates remain accessible without the team slug prefix. New public templates should use the full namespaced format.
+
+### Development and Production Names
+
+```typescript
+// Development template
+await Template.build(template, 'myapp-dev', { cpuCount: 1, memoryMB: 1024 })
+
+// Production template
+await Template.build(template, 'myapp-prod', { cpuCount: 4, memoryMB: 4096 })
+```
+
+### Resource Variants
+
+```typescript
+// Small instance
+await Template.build(template, 'myapp-small', { cpuCount: 1, memoryMB: 512 })
+
+// Large instance
+await Template.build(template, 'myapp-large', { cpuCount: 8, memoryMB: 16384 })
+```
+
+## Build Logging
+
+### Default Logger
+
+```typescript
+import { Template, defaultBuildLogger } from 'e2b';
+
+await Template.build(template, 'my-template', {
+  onBuildLogs: defaultBuildLogger({
+    minLevel: "info",  // Minimum log level: 'debug' | 'info' | 'warn' | 'error'
+  }),
+});
+```
+
+```python
+from e2b import Template, default_build_logger
+
+Template.build(
+    template,
+    'my-template',
+    on_build_logs=default_build_logger(
+        min_level="info",
+    )
+)
+```
+
+### Custom Logger
+
+```typescript
+// Simple logging
+onBuildLogs: (logEntry) => console.log(logEntry.toString());
+
+// Custom formatting
+onBuildLogs: (logEntry) => {
+  const time = logEntry.timestamp.toISOString();
+  console.log(`[${time}] ${logEntry.level.toUpperCase()}: ${logEntry.message}`);
+};
+
+// Filter by log level
+onBuildLogs: (logEntry) => {
+  if (logEntry.level === "error" || logEntry.level === "warn") {
+    console.error(logEntry.toString());
+  }
+};
+```
+
+```python
+# Simple logging
+on_build_logs=lambda log_entry: print(log_entry)
+
+# Custom formatting
+def custom_logger(log_entry):
+    time = log_entry.timestamp.isoformat()
+    print(f"[{time}] {log_entry.level.upper()}: {log_entry.message}")
+
+Template.build(template, 'my-template', on_build_logs=custom_logger)
+```
+
+### LogEntry Types
+
+The callback receives `LogEntry` objects with properties: `timestamp` (Date/datetime), `level` ('debug'|'info'|'warn'|'error'), and `message` (string).
+
+Special subtypes:
+- `LogEntryStart` - Indicates the start of the build process (level: 'debug')
+- `LogEntryEnd` - Indicates the end of the build process (level: 'debug')
+
+```typescript
+if (logEntry instanceof LogEntryStart) {
+  // Build started
+}
+if (logEntry instanceof LogEntryEnd) {
+  // Build ended
+}
+```
+
+```python
+if isinstance(log_entry, LogEntryStart):
+    # Build started
+    pass
+if isinstance(log_entry, LogEntryEnd):
+    # Build ended
+    pass
+```
+
+## Error Handling
+
+The SDK provides specific error types for template builds:
+
+```typescript
+import { AuthError, BuildError, FileUploadError } from 'e2b';
+
+try {
+  await Template.build(template, 'my-template');
+} catch (error) {
+  if (error instanceof AuthError) {
+    console.error("Authentication failed:", error.message);
+  } else if (error instanceof FileUploadError) {
+    console.error("File upload failed:", error.message);
+  } else if (error instanceof BuildError) {
+    console.error("Build failed:", error.message);
+  }
+}
+```
+
+```python
+from e2b import AuthError, BuildError, FileUploadError
+
+try:
+    Template.build(template, 'my-template')
+except AuthError as error:
+    print(f"Authentication failed: {error}")
+except FileUploadError as error:
+    print(f"File upload failed: {error}")
+except BuildError as error:
+    print(f"Build failed: {error}")
+```
+
+## Private Registries
+
+### General Registry
+
+```typescript
+Template().fromImage('ubuntu:22.04', {
+  username: 'user',
+  password: 'pass',
+})
+```
+
+```python
+Template().from_image(
+    image="ubuntu:22.04",
+    username="user",
+    password="pass",
+)
+```
+
+### GCP Artifact Registry
+
+```typescript
+// From file path
+Template().fromGCPRegistry('ubuntu:22.04', {
+  serviceAccountJSON: './service_account.json',
+})
+
+// From object
+Template().fromGCPRegistry('ubuntu:22.04', {
+  serviceAccountJSON: { project_id: '123', private_key_id: '456' },
+})
+```
+
+```python
+# From file path
+Template().from_gcp_registry(
+    image="ubuntu:22.04",
+    service_account_json="./service_account.json",
+)
+
+# From object
+Template().from_gcp_registry(
+    image="ubuntu:22.04",
+    service_account_json={"project_id": "123", "private_key_id": "456"},
+)
+```
+
+### AWS ECR
+
+```typescript
+Template().fromAWSRegistry('ubuntu:22.04', {
+  accessKeyId: '123',
+  secretAccessKey: '456',
+  region: 'us-west-1',
+})
+```
+
+```python
+Template().from_aws_registry(
+    image="ubuntu:22.04",
+    access_key_id="123",
+    secret_access_key="456",
+    region="us-west-1",
+)
+```
+
+## Migration from Legacy System
+
+There are three ways to migrate from the legacy template system (e2b.toml + Dockerfile) to Build System 2.0.
+
+### Migration Command (Recommended)
+
+1. Install the latest E2B CLI
+2. Navigate to your template folder (where `e2b.toml` and `e2b.Dockerfile` files are)
+3. Run migration command:
+
 ```bash
-ls -a /run/e2b/
-# .E2B_SANDBOX  .E2B_SANDBOX_ID  .E2B_TEAM_ID  .E2B_TEMPLATE_ID
+e2b template migrate
 ```
 
-## How Templates Work
+4. Follow the prompts
 
-### Build Process
+Your existing `e2b.toml` and `e2b.Dockerfile` files will be renamed to `e2b.toml.old` and `e2b.Dockerfile.old`.
 
-Every template build follows these steps:
+The migration generates three files:
 
-1. **Container creation**
-   - Base container created from definition
-   - Filesystem extracted
+**TypeScript:** `template.ts`, `build.dev.ts`, `build.prod.ts`
+**Python:** `template.py`, `build_dev.py`, `build_prod.py`
 
-2. **Provisioning**
-   - Install required dependencies
-   - Run layer commands
-   - Apply configurations
+### Using fromDockerfile()
 
-3. **Startup** (if start command specified)
-   - Execute start command
-   - Begin readiness monitoring
+Keep your existing Dockerfile content and parse it programmatically:
 
-4. **Readiness check**
-   - Default: 20 seconds if start command, else immediate
-   - Custom: Run ready command until exit code 0
-
-5. **Snapshot creation**
-   - Capture entire filesystem
-   - Serialize running processes
-   - Save as template
-
-### Snapshotting
-
-Snapshots are saved running sandboxes that include:
-
-- **Complete filesystem** - All files, directories, packages
-- **Running processes** - Active services, background jobs
-- **Process state** - Memory, connections, open files
-- **System configuration** - Environment variables, network setup
-
-Snapshots can be loaded later in **~300ms** with:
-- All processes already running
-- Filesystem exactly as saved
-- Zero installation or startup time
-
-### Load Time Benefits
-
-**Without template (runtime installation):**
-```
-Create sandbox (300ms)
-  → Install pandas (15s)
-  → Install numpy (10s)
-  → Install matplotlib (12s)
-  → Start Jupyter (5s)
-  → Total: ~42 seconds
+```typescript
+const template = Template()
+  .fromDockerfile(dockerfileContent);
 ```
 
-**With template (pre-installed):**
+```python
+template = (
+    Template()
+    .from_dockerfile(dockerfile_content)
+)
 ```
-Create sandbox from template (300ms)
-  → Everything already ready
-  → Total: 0.3 seconds
+
+Compatible instructions: `FROM`, `RUN`, `COPY`, `ADD`, `WORKDIR`, `USER`, `ENV`, `ARG`, `CMD`, `ENTRYPOINT`
+
+### Using fromImage()
+
+Build the Docker image yourself for `linux/amd64`, push to a registry, and reference it:
+
+```typescript
+const template = Template()
+  .fromImage("your-image:tag");
 ```
 
-**Speedup: 140x faster**
-
-### Default User and Workdir
-
-Templates include default user and working directory settings:
-
-- **Default user:** `user` (non-root)
-- **Default workdir:** `/home/user`
-- **Home directory:** `/home/user`
-
-You can customize these in Dockerfiles (legacy system).
-
-### Caching
-
-E2B caches template builds for faster subsequent builds:
-
-- **Layer caching** - Docker layers cached
-- **Package caching** - Downloaded packages cached
-- **Template caching** - Built templates cached
-
-**Note:** See [Caching documentation](https://e2b.dev/docs/template/caching) for details.
+```python
+template = (
+    Template()
+    .from_image("your-image:tag")
+)
+```
 
 ## Examples
 
-### Example 1: Data Science Template
+### Example 1: Claude Code Agent Sandbox
 
-Pre-install common data science packages.
+Template with Claude Code CLI pre-installed:
 
-**template.ts:**
 ```typescript
-import { Template } from "e2b";
+// template.ts
+import { Template } from 'e2b'
 
 export const template = Template()
-  .fromTemplate("code-interpreter-v1")
-  .pipInstall([
-    'pandas',
-    'numpy',
-    'matplotlib',
-    'seaborn',
-    'scikit-learn',
-    'jupyter'
-  ])
+  .fromNodeImage('24')
+  .aptInstall(['curl', 'git', 'ripgrep'])
+  .npmInstall('@anthropic-ai/claude-code@latest', { g: true })
 ```
 
-**build.prod.ts:**
-```typescript
-import "dotenv/config";
-import { Template, defaultBuildLogger } from "e2b";
-import { template } from "./template";
+```python
+# template.py
+from e2b import Template
 
-async function main() {
-  await Template.build(template, {
-    alias: "data-science",
-    cpuCount: 2,
-    memoryMB: 4096,
-    onBuildLogs: defaultBuildLogger(),
-  });
-}
-
-main().catch(console.error);
+template = (
+    Template()
+    .from_node_image("24")
+    .apt_install(["curl", "git", "ripgrep"])
+    .npm_install("@anthropic-ai/claude-code@latest", g=True)
+)
 ```
 
-**Usage:**
+Build and use:
+
 ```typescript
-const sbx = await Sandbox.create("data-science")
+// build.ts
+import { Template, defaultBuildLogger } from 'e2b'
+import { template as claudeCodeTemplate } from './template'
 
-// Immediately use pre-installed packages
-await sbx.runCode(`
-  import pandas as pd
-  import numpy as np
+Template.build(claudeCodeTemplate, 'claude-code', {
+  cpuCount: 1,
+  memoryMB: 1024,
+  onBuildLogs: defaultBuildLogger(),
+})
 
-  data = pd.DataFrame({
-    'A': np.random.randn(100),
-    'B': np.random.randn(100)
-  })
+// sandbox.ts
+import { Sandbox } from 'e2b'
 
-  print(data.describe())
-`)
+const sbx = await Sandbox.create('claude-code', {
+  envs: {
+    ANTHROPIC_API_KEY: '<your api key>',
+  },
+})
+
+const result = await sbx.commands.run(
+  `claude --dangerously-skip-permissions -p 'Create a hello world index.html'`,
+  { timeoutMs: 0 }
+)
+console.log(result.stdout)
+sbx.kill()
 ```
 
-### Example 2: Web Development Template
+### Example 2: Desktop Environment with VNC
 
-Pre-install Node.js packages for web development.
+Full Ubuntu 22.04 desktop with XFCE, VNC streaming, LibreOffice, and automation tools:
 
-**template.ts:**
 ```typescript
-import { Template } from "e2b";
+// template.ts
+import { Template, waitForPort } from 'e2b'
 
 export const template = Template()
-  .fromTemplate("code-interpreter-v1")
-  .npmInstall([
-    'express',
-    'axios',
-    'lodash',
-    'moment',
-    'dotenv'
+  .fromUbuntuImage('22.04')
+  .runCmd([
+    'yes | unminimize',
+    'apt-get update',
+    'apt-get install -y \
+      xserver-xorg xorg x11-xserver-utils xvfb x11-utils xauth \
+      xfce4 xfce4-goodies util-linux sudo curl git wget python3-pip \
+      xdotool scrot ffmpeg x11vnc net-tools netcat x11-apps \
+      libreoffice xpdf gedit xpaint tint2 galculator pcmanfm',
+    'apt-get clean',
+    'rm -rf /var/lib/apt/lists/*',
   ])
+  .runCmd([
+    'git clone --branch e2b-desktop https://github.com/e2b-dev/noVNC.git /opt/noVNC',
+    'ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html',
+    'git clone --branch v0.12.0 https://github.com/novnc/websockify /opt/noVNC/utils/websockify',
+  ])
+  .runCmd('ln -sf /usr/bin/xfce4-terminal.wrapper /etc/alternatives/x-terminal-emulator')
+  .copy('start_command.sh', '/start_command.sh')
+  .runCmd('chmod +x /start_command.sh')
+  .setStartCmd('/start_command.sh', waitForPort(6080))
 ```
 
-**build.prod.ts:**
+Build with higher resources:
+
 ```typescript
-import "dotenv/config";
-import { Template, defaultBuildLogger } from "e2b";
-import { template } from "./template";
-
-async function main() {
-  await Template.build(template, {
-    alias: "web-dev",
-    cpuCount: 2,
-    memoryMB: 2048,
-    onBuildLogs: defaultBuildLogger(),
-  });
-}
-
-main().catch(console.error);
+await Template.build(desktopTemplate, 'desktop', {
+  cpuCount: 8,
+  memoryMB: 8192,
+  onBuildLogs: defaultBuildLogger(),
+})
 ```
 
-**Usage:**
+### Example 3: Docker-in-Sandbox
+
 ```typescript
-const sbx = await Sandbox.create("web-dev")
-
-// Create Express server instantly
-await sbx.filesystem.write('/home/user/server.js', `
-  const express = require('express')
-  const app = express()
-
-  app.get('/', (req, res) => {
-    res.send('Hello from E2B!')
-  })
-
-  app.listen(3000, () => {
-    console.log('Server running on port 3000')
-  })
-`)
-
-await sbx.commands.run('node /home/user/server.js &')
-```
-
-### Example 3: Machine Learning Template (High Resources)
-
-Template with heavy ML libraries and more resources.
-
-**template.ts:**
-```typescript
-import { Template } from "e2b";
+// template.ts
+import { Template } from 'e2b'
 
 export const template = Template()
-  .fromTemplate("code-interpreter-v1")
-  .pipInstall([
-    'tensorflow',
-    'torch',
-    'transformers',
-    'datasets',
-    'scikit-learn'
-  ])
+  .fromUbuntuImage('25.04')
+  .runCmd('curl -fsSL https://get.docker.com | sudo sh')
+  .runCmd('sudo docker run --rm hello-world')
 ```
 
-**build.prod.ts:**
+Build (minimum 2 CPUs, 2 GB RAM recommended):
+
 ```typescript
-import "dotenv/config";
-import { Template, defaultBuildLogger } from "e2b";
-import { template } from "./template";
-
-async function main() {
-  await Template.build(template, {
-    alias: "ml-heavy",
-    cpuCount: 4,      // More CPU for training
-    memoryMB: 8192,   // 8GB RAM for large models
-    onBuildLogs: defaultBuildLogger(),
-  });
-}
-
-main().catch(console.error);
+Template.build(dockerTemplate, 'docker', {
+  cpuCount: 2,
+  memoryMB: 2048,
+  onBuildLogs: defaultBuildLogger(),
+})
 ```
 
-### Example 4: Legacy System with Running Service
+Usage:
 
-Use legacy system to pre-start a web server.
-
-**e2b.Dockerfile:**
-```dockerfile
-FROM e2bdev/code-interpreter:latest
-
-# Install Node.js if not present
-RUN apt-get update && apt-get install -y nodejs npm
-
-# Install Express
-RUN npm install -g express
-
-# Create startup script
-RUN echo '#!/bin/bash\nnode /home/user/server.js' > /root/start-server.sh
-RUN chmod +x /root/start-server.sh
-
-# Create sample server
-RUN echo "const express = require('express')\n\
-const app = express()\n\
-app.get('/', (req, res) => res.send('Ready!'))\n\
-app.listen(3000, () => console.log('Server started'))" > /home/user/server.js
-```
-
-**e2b.toml:**
-```toml
-template_id = "express-server"
-dockerfile = "e2b.Dockerfile"
-template_name = "express-prestarted"
-start_cmd = "/root/start-server.sh"
-ready_cmd = 'curl -s http://localhost:3000 > /dev/null'
-```
-
-**Build:**
-```bash
-e2b template build
-```
-
-**Usage:**
 ```typescript
-const sbx = await Sandbox.create("express-server")
-// Server is already running on port 3000!
+const sbx = await Sandbox.create('docker')
+const result = await sbx.commands.run('sudo docker run --rm alpine echo "Hello from Alpine!"')
+console.log(result.stdout)
+await sbx.kill()
+```
+
+### Example 4: Next.js App (Node.js)
+
+Next.js with Tailwind and shadcn UI, development server pre-started on port 3000:
+
+```typescript
+// template.ts
+import { Template, waitForURL } from 'e2b'
+
+export const template = Template()
+  .fromNodeImage('21-slim')
+  .setWorkdir('/home/user/nextjs-app')
+  .runCmd(
+    'npx create-next-app@14.2.30 . --ts --tailwind --no-eslint --import-alias "@/*" --use-npm --no-app --no-src-dir'
+  )
+  .runCmd('npx shadcn@2.1.7 init -d')
+  .runCmd('npx shadcn@2.1.7 add --all')
+  .runCmd('mv /home/user/nextjs-app/* /home/user/ && rm -rf /home/user/nextjs-app')
+  .setWorkdir('/home/user')
+  .setStartCmd('npx next --turbo', waitForURL('http://localhost:3000'))
+```
+
+```typescript
+Template.build(nextJSTemplate, 'nextjs-app', {
+  cpuCount: 4,
+  memoryMB: 4096,
+  onBuildLogs: defaultBuildLogger(),
+})
+```
+
+### Example 5: Next.js App (Bun)
+
+Same as above but using Bun runtime:
+
+```typescript
+// template.ts
+import { Template, waitForURL } from 'e2b'
+
+export const template = Template()
+  .fromBunImage('1.3')
+  .setWorkdir('/home/user/nextjs-app')
+  .runCmd('bun create next-app --app --ts --tailwind --turbopack --yes --use-bun .')
+  .runCmd('bunx --bun shadcn@latest init -d')
+  .runCmd('bunx --bun shadcn@latest add --all')
+  .runCmd('mv /home/user/nextjs-app/* /home/user/ && rm -rf /home/user/nextjs-app')
+  .setWorkdir('/home/user')
+  .setStartCmd('bun --bun run dev --turbo', waitForURL('http://localhost:3000'))
+```
+
+```typescript
+Template.build(nextJSTemplate, 'nextjs-app-bun', {
+  cpuCount: 4,
+  memoryMB: 4096,
+  onBuildLogs: defaultBuildLogger(),
+})
+```
+
+### Example 6: Expo App
+
+Expo web app with development server on port 8081:
+
+```typescript
+// template.ts
+import { Template, waitForURL } from 'e2b'
+
+export const template = Template()
+  .fromNodeImage()
+  .setWorkdir("/home/user/expo-app")
+  .runCmd("npx create-expo-app@latest . --yes")
+  .runCmd("mv /home/user/expo-app/* /home/user/ && rm -rf /home/user/expo-app")
+  .setWorkdir("/home/user")
+  .setStartCmd("npx expo start", waitForURL("http://localhost:8081"));
+```
+
+```typescript
+Template.build(expoTemplate, 'expo-app', {
+  cpuCount: 4,
+  memoryMB: 8192,
+  onBuildLogs: defaultBuildLogger(),
+})
 ```
 
 ## Best Practices
 
-### 1. Choose the Right Build System
+### 1. Use Tags for Versioning
 
-**Use Build System 2.0 when:**
-- Installing pip/npm packages only
-- Want programmatic template definitions
-- Need integration with TypeScript/JavaScript workflows
-- Building modern applications
+Instead of version numbers in names, use the tag system:
 
-**Use Legacy System when:**
-- Need system packages (apt-get)
-- Want to run services at startup
-- Require complex Dockerfile customizations
-- Need precise container control
+```typescript
+// Good - use tags
+await Template.build(template, 'myapp:v1.0.0')
+await Template.build(template, 'myapp', { tags: ['v1.1.0', 'latest'] })
+
+// Avoid - version in name
+await Template.build(template, 'myapp-v1.0.0')
+```
 
 ### 2. Optimize Package Installation
 
-**Pin package versions:**
+Pin package versions for reproducibility:
+
 ```typescript
 .pipInstall([
   'pandas==2.0.0',
@@ -802,145 +1586,93 @@ const sbx = await Sandbox.create("express-server")
 ])
 ```
 
-**Group related packages:**
+Group related packages in single calls:
+
 ```typescript
-// Good: Related packages together
+// Good: Single install call
 .pipInstall(['pandas', 'numpy', 'matplotlib'])
 
-// Avoid: Separate installs for each
+// Avoid: Separate installs (each creates a new layer)
 .pipInstall(['pandas'])
 .pipInstall(['numpy'])
 .pipInstall(['matplotlib'])
 ```
 
-### 3. Resource Allocation
+### 3. Optimize Layer Order for Caching
 
-**Match resources to workload:**
+Place frequently changing commands towards the end of the template definition:
+
 ```typescript
-// Light workloads
+const template = Template()
+  .fromNodeImage('lts')
+  .aptInstall(['curl', 'git'])        // Rarely changes - cached
+  .copy("package.json", "/app/package.json")  // Changes sometimes
+  .runCmd("npm install")               // Depends on package.json
+  .copy("src/", "/app/src/")           // Changes often - last
+```
+
+### 4. Resource Allocation
+
+Match resources to workload:
+
+```typescript
+// Light workloads (simple scripts)
 cpuCount: 1, memoryMB: 512
 
 // Standard workloads (web servers, APIs)
 cpuCount: 2, memoryMB: 2048
 
-// Heavy workloads (ML, data processing)
-cpuCount: 4, memoryMB: 8192
+// Heavy workloads (ML, desktop, build tools)
+cpuCount: 4, memoryMB: 4096
+
+// Maximum
+cpuCount: 8, memoryMB: 16384
 ```
 
-**Don't over-provision:**
-- Higher resources = higher cost
-- Start small, scale up if needed
-
-### 4. Template Naming
-
-Use descriptive, versioned aliases:
+### 5. Use Descriptive Names
 
 ```typescript
 // Good
-alias: "data-science-v2"
-alias: "web-api-prod"
-alias: "ml-inference-gpu"
+'data-science'
+'web-api'
+'claude-code'
 
 // Avoid
-alias: "template1"
-alias: "test"
-alias: "my-template"
+'template1'
+'test'
+'my-template'
 ```
 
-### 5. Start Commands and Readiness
-
-**Keep start commands simple:**
-```bash
-# Good: Simple, focused
-start_cmd = "python /app/server.py"
-
-# Avoid: Complex chains
-start_cmd = "cd /app && npm install && npm start"
-```
-
-**Use appropriate readiness checks:**
-```toml
-# For web servers: Check HTTP response
-ready_cmd = 'curl -s http://localhost:8000 > /dev/null'
-
-# For databases: Check connection
-ready_cmd = 'pg_isready -h localhost'
-
-# For processes: Check if running
-ready_cmd = 'pgrep my-service > /dev/null'
-```
-
-### 6. Template Versioning
-
-Version your templates for reproducibility:
-
-```typescript
-// Option 1: Version in alias
-alias: "data-science-v1.2.0"
-
-// Option 2: Save template ID
-const templateId = await Template.build(template, { ... })
-// Save templateId to config/database
-```
-
-### 7. Build Logging
-
-Always enable build logs to debug issues:
+### 6. Always Enable Build Logs
 
 ```typescript
 await Template.build(template, {
-  alias: "my-template",
   onBuildLogs: defaultBuildLogger(),  // Essential for debugging
 });
 ```
 
-### 8. Testing Templates
-
-Test templates before production:
+### 7. Test Before Production
 
 ```typescript
-// Build test template
-await Template.build(template, {
-  alias: "my-template-test",
-  onBuildLogs: defaultBuildLogger(),
-});
+// Build dev template
+await Template.build(template, 'my-template:dev')
 
-// Test functionality
-const sbx = await Sandbox.create("my-template-test")
-// Run test code...
+// Test in sandbox
+const sbx = await Sandbox.create('my-template:dev')
+// ... run tests ...
 
-// If successful, build production template
-await Template.build(template, {
-  alias: "my-template-prod",
-});
+// Promote to production
+await Template.assignTags('my-template:dev', 'production')
 ```
 
-### 9. Documentation
+### 8. Leverage Cache for Variants
 
-Document your templates:
+Build multiple CPU/RAM configurations reusing common layers:
 
 ```typescript
-// template.ts
-/**
- * Data Science Template v2.0
- *
- * Includes:
- * - pandas 2.0.0
- * - numpy 1.24.0
- * - matplotlib 3.7.0
- * - scikit-learn 1.3.0
- *
- * Resources: 2 CPU, 4GB RAM
- * Use cases: Data analysis, visualization, ML prototyping
- */
-export const template = Template()
-  .fromTemplate("code-interpreter-v1")
-  .pipInstall([
-    'pandas==2.0.0',
-    'numpy==1.24.0',
-    'matplotlib==3.7.0',
-    'scikit-learn==1.3.0'
-  ])
+await Template.build(template, 'myapp-small', { cpuCount: 1, memoryMB: 512 })
+await Template.build(template, 'myapp-large', { cpuCount: 8, memoryMB: 16384 })
+// Second build reuses all cached layers
 ```
 
 ## Troubleshooting
@@ -950,158 +1682,60 @@ export const template = Template()
 **Problem:** Template build fails during package installation
 
 **Solutions:**
-```typescript
-// 1. Check package names are correct
-.pipInstall(['pandas', 'numpy'])  // Correct
-.pipInstall(['panda', 'numpie'])  // Incorrect
+- Verify package names are correct
+- Pin package versions to avoid dependency conflicts
+- Enable build logs: `onBuildLogs: defaultBuildLogger()`
+- Use specific error handling (`AuthError`, `BuildError`, `FileUploadError`)
 
-// 2. Pin package versions to avoid conflicts
-.pipInstall([
-  'pandas==2.0.0',
-  'numpy==1.24.0'
-])
+### Start Command Not Working
 
-// 3. Enable build logs to see error details
-onBuildLogs: defaultBuildLogger()
-```
-
-### Readiness Timeout
-
-**Problem:** Template build times out waiting for readiness
+**Problem:** Service not running when sandbox spawns
 
 **Solutions:**
-```toml
-# 1. Verify ready command works manually
-ready_cmd = 'curl -s http://localhost:3000 > /dev/null'
-
-# 2. Simplify ready command
-# Instead of: Complex check with multiple conditions
-ready_cmd = 'curl -s http://localhost:3000 && pgrep server'
-# Use: Simple single check
-ready_cmd = 'curl -s http://localhost:3000 > /dev/null'
-
-# 3. Increase timeout (if needed)
-# Check E2B documentation for timeout settings
-```
-
-### Start Command Not Running
-
-**Problem:** Start command doesn't execute in spawned sandboxes
-
-**Solution:**
-```toml
-# Ensure start command is executable
-start_cmd = "/root/start.sh"
-
-# In Dockerfile:
-RUN chmod +x /root/start.sh
-```
+- Verify the start command works in an interactive sandbox first
+- Use appropriate ready command helpers (`waitForPort`, `waitForURL`, `waitForProcess`)
+- Check build logs for startup errors
+- Ensure the start command doesn't exit immediately (long-running process required)
 
 ### Package Not Found at Runtime
 
-**Problem:** Packages installed in template not found in sandbox
+**Problem:** Packages installed in template not available in sandbox
 
 **Solutions:**
-```typescript
-// 1. Verify template was built successfully
-// Check build logs for errors
-
-// 2. Ensure using correct template
-const sbx = await Sandbox.create("correct-template-name")
-
-// 3. Verify package was added to template definition
-.pipInstall(['missing-package'])
-
-// 4. Rebuild template after changes
-await Template.build(template, { ... })
-```
-
-### High Memory Usage
-
-**Problem:** Template uses too much memory
-
-**Solutions:**
-```typescript
-// 1. Reduce resource allocation
-memoryMB: 2048  // Instead of 8192
-
-// 2. Reduce number of pre-installed packages
-// Only include essential packages
-
-// 3. Monitor with metrics
-const metrics = await sbx.getMetrics()
-console.log(metrics.memory)
-```
+- Verify template was built successfully (check build logs)
+- Ensure you are creating the sandbox from the correct template name/tag
+- Verify the package was included in the template definition
+- Rebuild the template after making changes
 
 ### Slow Build Times
 
-**Problem:** Template builds take too long
+**Solutions:**
+- Use layer caching -- place stable commands early in the definition
+- Extend existing templates with `fromTemplate()` instead of rebuilding from scratch
+- Pin package versions to avoid dependency resolution overhead
+- Only install frequently-used packages in template; install rare packages at runtime
+- Use `skipCache: false` (default) to leverage cached layers
+
+### Cache Not Working
+
+**Problem:** Builds are not using cached layers
 
 **Solutions:**
-```typescript
-// 1. Use caching - rebuild from existing template
-.fromTemplate("existing-template-id")
-
-// 2. Reduce package count
-// Only install frequently-used packages
-// Install rare packages at runtime
-
-// 3. Pin package versions
-// Avoids dependency resolution overhead
-.pipInstall(['pandas==2.0.0'])
-```
-
-### Template Not Found
-
-**Problem:** Cannot create sandbox from template
-
-**Solutions:**
-```typescript
-// 1. Verify template alias is correct
-const sbx = await Sandbox.create("exact-alias-name")
-
-// 2. Check template was built successfully
-// Review build logs
-
-// 3. Use template ID instead of alias
-const sbx = await Sandbox.create("1wdqsf9le9gk21ztb4mo")
-```
-
-### Port Conflicts
-
-**Problem:** Service in template can't bind to port
-
-**Solutions:**
-```toml
-# 1. Use unique ports for each service
-start_cmd = "python server.py --port 8000"
-
-# 2. Check no other service uses the port
-# In Dockerfile, ensure clean state
-
-# 3. Use environment variables for port config
-start_cmd = "PORT=8000 python server.py"
-```
+- Ensure the template definition order hasn't changed (changes invalidate downstream layers)
+- Check if `skipCache: true` is set in the build options
+- Verify file content hasn't changed when using `.copy()`
+- Remember cache is team-scoped -- it works across templates with identical layers
 
 ### Permission Errors
 
-**Problem:** Permission denied errors in template
+**Problem:** Permission denied errors during build or in sandbox
 
 **Solutions:**
-```dockerfile
-# 1. Ensure files are owned by correct user
-RUN chown -R user:user /home/user/
-
-# 2. Make scripts executable
-RUN chmod +x /root/start.sh
-
-# 3. Run as appropriate user
-USER user
-```
+- Use `setUser()` to switch to appropriate user before running commands
+- Run commands as specific user: `runCmd('npm install', { user: 'node' })`
+- Default user is `user` (non-root); use `setUser('root')` if root access is needed temporarily
 
 ### Getting Help
-
-If you encounter issues:
 
 1. **Check build logs:** `onBuildLogs: defaultBuildLogger()`
 2. **Review documentation:** [E2B Template Docs](https://e2b.dev/docs/template)

@@ -1,6 +1,6 @@
 # MCP Gateway
 
-E2B's MCP Gateway provides seamless access to 200+ Model Context Protocol (MCP) servers, enabling sandboxes to integrate with external tools and services for data access, cloud operations, web scraping, business automation, and AI capabilities.
+E2B's MCP Gateway provides seamless access to 200+ Model Context Protocol (MCP) servers from the [Docker MCP Catalog](https://hub.docker.com/mcp), enabling sandboxes to integrate with external tools and services for data access, cloud operations, web scraping, business automation, and AI capabilities. You can also run [custom MCP servers](#custom-mcp-servers) from GitHub repositories.
 
 ## What is MCP Gateway?
 
@@ -13,9 +13,11 @@ The Model Context Protocol (MCP) is an open standard that allows AI agents and L
 E2B provides built-in MCP Gateway functionality that:
 - **Hosts 200+ pre-configured MCP servers** from Docker's catalog
 - **Runs servers inside sandboxes** with proper isolation
+- **Supports custom MCP servers** from public GitHub repositories
 - **Provides HTTP access** both from outside and inside sandboxes
 - **Manages authentication** through bearer tokens
 - **Supports custom configuration** per server instance
+- **Supports custom templates** with pre-pulled MCP server images for faster startup
 
 ### Benefits
 
@@ -31,31 +33,36 @@ E2B provides built-in MCP Gateway functionality that:
 
 Enable MCP servers when creating a sandbox by passing configuration for each server you want to use.
 
-**Python (using JavaScript SDK):**
+**Python (async):**
 ```python
-from e2b_code_interpreter import Sandbox
+import asyncio
+from e2b import AsyncSandbox
 import os
 
-sandbox = Sandbox.create(
-    mcp={
-        'browserbase': {
-            'apiKey': os.environ['BROWSERBASE_API_KEY'],
-            'geminiApiKey': os.environ['GEMINI_API_KEY'],
-            'projectId': os.environ['BROWSERBASE_PROJECT_ID']
+async def main():
+    sandbox = await AsyncSandbox.create(mcp={
+        "browserbase": {
+            "apiKey": os.environ["BROWSERBASE_API_KEY"],
+            "geminiApiKey": os.environ["GEMINI_API_KEY"],
+            "projectId": os.environ["BROWSERBASE_PROJECT_ID"],
         },
-        'exa': {
-            'apiKey': os.environ['EXA_API_KEY']
+        "exa": {
+            "apiKey": os.environ["EXA_API_KEY"],
         },
-        'notion': {
-            'internalIntegrationToken': os.environ['NOTION_API_KEY']
-        }
-    }
-)
+        "notion": {
+            "internalIntegrationToken": os.environ["NOTION_API_KEY"],
+        },
+    })
+
+    mcp_url = sandbox.get_mcp_url()
+    mcp_token = await sandbox.get_mcp_token()
+
+asyncio.run(main())
 ```
 
 **JavaScript:**
 ```javascript
-import { Sandbox } from '@e2b/code-interpreter'
+import Sandbox from 'e2b'
 
 const sandbox = await Sandbox.create({
     mcp: {
@@ -72,24 +79,7 @@ const sandbox = await Sandbox.create({
         }
     }
 })
-```
 
-### Getting MCP URL and Token
-
-Each sandbox provides a unique MCP URL and authentication token:
-
-**Python:**
-```python
-# Get MCP endpoint URL
-mcp_url = sandbox.get_mcp_url()
-# Example: https://e2b-mcp-gateway.com/sandbox/abc123/mcp
-
-# Get authentication token
-mcp_token = sandbox.get_mcp_token()
-```
-
-**JavaScript:**
-```javascript
 const mcpUrl = sandbox.getMcpUrl()
 const mcpToken = await sandbox.getMcpToken()
 ```
@@ -135,6 +125,28 @@ await client.close()
 await sandbox.kill()
 ```
 
+**Using Official MCP Client (Python):**
+```python
+import asyncio
+from datetime import timedelta
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    async with streamablehttp_client(
+        url=sandbox.get_mcp_url(),
+        headers={"Authorization": f"Bearer {await sandbox.get_mcp_token()}"},
+        timeout=timedelta(seconds=600)
+    ) as (read_stream, write_stream, _):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            print(f"Available tools: {[tool.name for tool in tools.tools]}")
+    await sandbox.kill()
+
+asyncio.run(main())
+```
+
 ### Connecting from Inside the Sandbox
 
 Access the MCP gateway from code running within the sandbox itself:
@@ -148,7 +160,7 @@ http://localhost:50005/mcp
 
 ## Available Servers (200+)
 
-E2B provides access to 200+ MCP servers organized by category. Below are the most commonly used servers in each category.
+E2B provides access to 200+ MCP servers from [Docker's catalog](https://hub.docker.com/mcp). Below are the most commonly used servers in each category.
 
 ### Data & Database Servers
 
@@ -161,11 +173,6 @@ E2B provides access to 200+ MCP servers organized by category. Below are the mos
 - **Purpose**: Relational database operations
 - **Configuration**: `url` (connection string)
 - **Use Cases**: SQL queries, table operations, transactions
-
-**CockroachDB**
-- **Purpose**: Distributed SQL database
-- **Configuration**: `host`, `port`, `username`, `crdbPwd`, SSL certificates
-- **Use Cases**: Scalable SQL operations with high availability
 
 **Elasticsearch**
 - **Purpose**: Search and analytics engine
@@ -189,16 +196,6 @@ E2B provides access to 200+ MCP servers organized by category. Below are the mos
 - **Configuration**: `azureDir`, `kubeconfig`, `accessLevel`
 - **Use Cases**: Deploy and manage containerized applications
 
-**AWS CDK/Core**
-- **Purpose**: AWS infrastructure as code
-- **Configuration**: AWS credentials
-- **Use Cases**: Define and provision AWS resources
-
-**Google Cloud Run**
-- **Purpose**: Serverless container deployment
-- **Configuration**: `credentialsPath` to credentials file
-- **Use Cases**: Deploy and manage Cloud Run services
-
 **Kubernetes**
 - **Purpose**: Container orchestration
 - **Configuration**: `configPath` to kubeconfig file
@@ -216,20 +213,10 @@ E2B provides access to 200+ MCP servers organized by category. Below are the mos
 - **Configuration**: `apiKey`
 - **Use Cases**: Privacy-focused web search queries
 
-**Perplexity**
-- **Purpose**: AI-powered search
-- **Configuration**: `perplexityApiKey`
-- **Use Cases**: Question answering, research queries
-
-**DuckDuckGo**
-- **Purpose**: Privacy-focused web search
-- **Configuration**: None (no authentication needed)
-- **Use Cases**: Anonymous web searches
-
-**Tavily**
-- **Purpose**: AI-optimized search API
+**Exa**
+- **Purpose**: AI-optimized search
 - **Configuration**: `apiKey`
-- **Use Cases**: Research, fact-checking, content discovery
+- **Use Cases**: Research, content discovery
 
 ### Business & Productivity
 
@@ -248,54 +235,15 @@ E2B provides access to 200+ MCP servers organized by category. Below are the mos
 - **Configuration**: `githubPersonalAccessToken`
 - **Use Cases**: Code operations, issues, pull requests, workflows
 
-**Jira/Confluence**
+**Atlassian (Jira/Confluence)**
 - **Purpose**: Project management and documentation
-- **Configuration**: Base URLs, API tokens or personal tokens
+- **Configuration**: Base URLs, API tokens
 - **Use Cases**: Issue tracking, documentation management
 
-**HubSpot**
-- **Purpose**: CRM and marketing automation
-- **Configuration**: `apiKey`
-- **Use Cases**: Contact management, deal tracking, email campaigns
-
-### Development & Code
-
-**GitHub Chat**
-- **Purpose**: Conversational interface to GitHub
-- **Configuration**: `githubApiKey`
-- **Use Cases**: Repository queries, code search, issue management
-
-**JetBrains IDE**
-- **Purpose**: IDE integration
-- **Configuration**: `port` configuration
-- **Use Cases**: Code navigation, refactoring, debugging
-
-**ast-grep**
-- **Purpose**: Structural code search
-- **Configuration**: `path` to code directory
-- **Use Cases**: Find code patterns, refactor code
-
-**Semgrep**
-- **Purpose**: Static code analysis
-- **Configuration**: Docker setup
-- **Use Cases**: Security scanning, code quality checks
-
-### AI & Content Generation
-
-**OpenAI/Browserbase**
-- **Purpose**: Browser automation with AI
-- **Configuration**: Multiple API keys (Gemini, project ID)
-- **Use Cases**: Automated web browsing, data extraction
-
-**Hugging Face**
-- **Purpose**: ML model hub
-- **Configuration**: None (basic access)
-- **Use Cases**: Model inference, dataset access
-
-**ElevenLabs**
-- **Purpose**: Text-to-speech AI
-- **Configuration**: Optional `apiKey`, `data` path
-- **Use Cases**: Voice generation, audio processing
+**Airtable**
+- **Purpose**: Database-spreadsheet hybrid
+- **Configuration**: `airtableApiKey`
+- **Use Cases**: Read schemas, query records, automate workflows
 
 ### Finance & Commerce
 
@@ -304,22 +252,7 @@ E2B provides access to 200+ MCP servers organized by category. Below are the mos
 - **Configuration**: `secretKey`
 - **Use Cases**: Process payments, manage subscriptions, invoicing
 
-**Razorpay**
-- **Purpose**: Payment gateway (India)
-- **Configuration**: `keyId`, optional `keySecret`
-- **Use Cases**: Accept payments, refunds, settlements
-
-**Mercado Pago**
-- **Purpose**: Payment platform (Latin America)
-- **Configuration**: `mercadoPagoApiKey`
-- **Use Cases**: Process payments, manage checkouts
-
 ### Special Purpose Servers
-
-**Python Interpreter**
-- **Purpose**: Execute Python code in notebook-like environment
-- **Configuration**: None
-- **Use Cases**: Code execution, data analysis
 
 **Filesystem**
 - **Purpose**: File system operations
@@ -331,56 +264,133 @@ E2B provides access to 200+ MCP servers organized by category. Below are the mos
 - **Configuration**: None
 - **Use Cases**: Store and retrieve structured information
 
-**Time**
-- **Purpose**: Timezone conversions and time operations
-- **Configuration**: None
-- **Use Cases**: Time zone management, date calculations
+## Custom MCP Servers
 
-## Connection Examples
+In addition to the 200+ pre-built MCP servers, you can run custom MCP servers directly from public GitHub repositories.
 
-### Official MCP Client
+### How It Works
 
-**TypeScript:**
-```typescript
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+When you specify a GitHub repository, E2B will:
+1. Clone the repository into the sandbox
+2. Run the `installCmd` (optional) to install dependencies
+3. Run the `runCmd` to start the MCP server with stdio transport
 
-const client = new Client({
-    name: 'e2b-mcp-client',
-    version: '1.0.0'
-})
+The `runCmd` must start an MCP server that follows the MCP specification and communicates via stdio.
 
-const transport = new StreamableHTTPClientTransport(
-    new URL(sandbox.getMcpUrl()),
-    {
-        requestInit: {
-            headers: {
-                'Authorization': `Bearer ${await sandbox.getMcpToken()}`
-            }
-        }
-    }
-)
+### Using a Custom MCP Server
 
-await client.connect(transport)
+**JavaScript:**
+```javascript
+import Sandbox from 'e2b'
 
-// List available tools
-const tools = await client.listTools()
-
-// Call a tool
-const result = await client.callTool({
-    name: 'github_create_issue',
-    arguments: {
-        owner: 'myorg',
-        repo: 'myrepo',
-        title: 'Bug report',
-        body: 'Description here'
-    }
+const sandbox = await Sandbox.create({
+    mcp: {
+        'github/modelcontextprotocol/servers': {
+            installCmd: 'npm install',
+            runCmd: 'sudo npx -y @modelcontextprotocol/server-filesystem /root',
+        },
+    },
 })
 ```
 
-### Claude Desktop
+**Python:**
+```python
+from e2b import Sandbox
 
-Connect Claude Desktop to your E2B MCP Gateway:
+sbx = Sandbox.create(
+    mcp={
+        "github/modelcontextprotocol/servers": {
+            "install_cmd": "npm install",
+            "run_cmd": "sudo npx -y @modelcontextprotocol/server-filesystem /root",
+        },
+    }
+)
+```
+
+### Configuration
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `installCmd` / `install_cmd` | string | No | Command to install dependencies before starting the MCP server |
+| `runCmd` / `run_cmd` | string | Yes | Command to start the stdio-enabled MCP server |
+
+**Important for npx-based servers:** Always include `installCmd: 'npm install'` when using `npx` in your `runCmd`. Without installing dependencies first, npx will try to use the local repository and fail.
+
+### Troubleshooting Custom Servers
+
+If your custom MCP server doesn't work as expected:
+1. Explore the sandbox via the dashboard or by connecting with `e2b connect <sandbox-id>`
+2. Check the gateway log file with `sudo cat /var/log/mcp-gateway/gateway.log`
+
+## Custom Templates with Pre-pulled MCP Servers
+
+You can prepull MCP server Docker images during template build time for faster runtime performance.
+
+### Building a Template with MCP Servers
+
+You must use the `mcp-gateway` template as your base template.
+
+**JavaScript:**
+```javascript
+import { Template, defaultBuildLogger } from 'e2b'
+
+const template = Template()
+  .fromTemplate("mcp-gateway")
+  .addMcpServer(["browserbase", "exa"])
+
+await Template.build(template, 'my-mcp-gateway', {
+  cpuCount: 8,
+  memoryMB: 8192,
+  onBuildLogs: defaultBuildLogger(),
+})
+```
+
+**Python:**
+```python
+from e2b import Template, default_build_logger
+
+template = (
+    Template()
+    .from_template("mcp-gateway")
+    .add_mcp_server(["browserbase", "exa"])
+)
+
+Template.build(
+    template,
+    'my-mcp-gateway',
+    cpu_count=8,
+    memory_mb=8192,
+    on_build_logs=default_build_logger(),
+)
+```
+
+### Using the Template
+
+Once built, create sandboxes from your template. You still need to provide configuration for each MCP server.
+
+```javascript
+import { Sandbox } from 'e2b'
+
+const sandbox = await Sandbox.create({
+    template: "my-mcp-gateway",
+    mcp: {
+        browserbase: {
+            apiKey: process.env.BROWSERBASE_API_KEY,
+            geminiApiKey: process.env.GEMINI_API_KEY,
+            projectId: process.env.BROWSERBASE_PROJECT_ID,
+        },
+        exa: {
+            apiKey: process.env.EXA_API_KEY,
+        },
+    },
+})
+```
+
+## Connection Examples
+
+### Claude Desktop / Claude Code
+
+Connect Claude to your E2B MCP Gateway:
 
 ```bash
 claude mcp add \
@@ -388,15 +398,6 @@ claude mcp add \
     e2b-mcp-gateway \
     <mcp_url> \
     --header "Authorization: Bearer <mcp_token>"
-```
-
-**Example:**
-```bash
-claude mcp add \
-    --transport http \
-    e2b-mcp-gateway \
-    https://e2b-mcp-gateway.com/sandbox/abc123/mcp \
-    --header "Authorization: Bearer eyJhbGc..."
 ```
 
 ### OpenAI Agents SDK
@@ -414,69 +415,27 @@ const mcp = new MCPServerStreamableHttp({
         }
     }
 })
-
-// Use with OpenAI Agents
-const agent = new Agent({
-    name: 'Data Agent',
-    mcpServers: [mcp]
-})
 ```
 
-### Custom Clients
-
-Any HTTP client can connect to the MCP Gateway:
-
-**Python with requests:**
+**Python:**
 ```python
-import requests
+from agents.mcp import MCPServerStreamableHttp
 
-headers = {
-    'Authorization': f'Bearer {mcp_token}',
-    'Content-Type': 'application/json'
-}
-
-# List tools
-response = requests.post(
-    f'{mcp_url}/list_tools',
-    headers=headers
-)
-tools = response.json()
-
-# Call tool
-response = requests.post(
-    f'{mcp_url}/call_tool',
-    headers=headers,
-    json={
-        'name': 'postgres_query',
-        'arguments': {
-            'query': 'SELECT * FROM users LIMIT 10'
-        }
-    }
-)
-result = response.json()
+async with MCPServerStreamableHttp(
+    name="e2b-mcp-client",
+    params={
+        "url": sandbox.get_mcp_url(),
+        "headers": {"Authorization": f"Bearer {await sandbox.get_mcp_token()}"},
+    },
+) as server:
+    tools = await server.list_tools()
+    print("Available tools:", [t.name for t in tools])
 ```
 
-**cURL:**
-```bash
-# List tools
-curl -X POST \
-    -H "Authorization: Bearer $MCP_TOKEN" \
-    -H "Content-Type: application/json" \
-    "$MCP_URL/list_tools"
-
-# Call tool
-curl -X POST \
-    -H "Authorization: Bearer $MCP_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"name":"slack_send_message","arguments":{"channel":"general","text":"Hello"}}' \
-    "$MCP_URL/call_tool"
-```
-
-## MCP Inspector for Debugging
+### MCP Inspector for Debugging
 
 The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is an official debugging tool that provides a web interface for testing MCP servers.
 
-**Running MCP Inspector:**
 ```bash
 npx @modelcontextprotocol/inspector \
     --transport http \
@@ -484,20 +443,25 @@ npx @modelcontextprotocol/inspector \
     --header "Authorization: Bearer <mcp_token>"
 ```
 
-**Example:**
-```bash
-npx @modelcontextprotocol/inspector \
-    --transport http \
-    --url https://e2b-mcp-gateway.com/sandbox/abc123/mcp \
-    --header "Authorization: Bearer eyJhbGc..."
-```
-
 This opens a web interface where you can:
 - **Browse available tools** - See all tools exposed by enabled MCP servers
 - **Test tool calls** - Execute tools with different parameters
 - **Inspect payloads** - View request/response JSON
 - **Debug connection issues** - Verify authentication and connectivity
-- **Explore schemas** - Understand tool input/output formats
+
+## Example Projects
+
+The E2B Cookbook contains ready-to-run example projects:
+
+- **Claude Code** - Claude Code with MCP integration
+- **Browserbase** - Web automation agent with Browserbase
+- **Groq + Exa** - AI research using Groq and Exa
+- **Research agent** - Research Agent using OpenAI Agents framework
+- **MCP client** - Basic MCP client connecting to an E2B Sandbox
+- **Custom MCP server** - Use custom MCP servers installed from GitHub
+- **Custom template** - Create a custom E2B Sandbox with pre-installed MCP servers
+
+All examples available at: https://github.com/e2b-dev/e2b-cookbook
 
 ## Common Patterns
 
@@ -506,7 +470,7 @@ This opens a web interface where you can:
 Enable multiple MCP servers for comprehensive capabilities:
 
 ```python
-from e2b_code_interpreter import Sandbox
+from e2b import Sandbox
 import os
 
 sandbox = Sandbox.create(
@@ -533,133 +497,43 @@ sandbox = Sandbox.create(
 # send Slack messages, and manage GitHub issues all through MCP
 ```
 
-### Pattern 2: Data Pipeline
+### Pattern 2: Claude Code Inside Sandbox with MCP
 
-Use MCP for ETL operations:
+Run Claude Code inside an E2B sandbox with MCP servers:
 
 ```typescript
-const sandbox = await Sandbox.create({
+import Sandbox from 'e2b'
+
+const sbx = await Sandbox.create({
     mcp: {
-        mongodb: { mdbMcpConnectionString: process.env.MONGO_URL },
-        postgres: { url: process.env.POSTGRES_URL },
-        redis: {
-            host: 'localhost',
-            port: 6379,
-            password: process.env.REDIS_PASSWORD
-        }
-    }
+        browserbase: {
+            apiKey: process.env.BROWSERBASE_API_KEY,
+            geminiApiKey: process.env.GEMINI_API_KEY,
+            projectId: process.env.BROWSERBASE_PROJECT_ID,
+        },
+        exa: {
+            apiKey: process.env.EXA_API_KEY,
+        },
+    },
 })
 
-// Connect MCP client
-const client = new Client({ name: 'etl-pipeline', version: '1.0.0' })
-const transport = new StreamableHTTPClientTransport(
-    new URL(sandbox.getMcpUrl()),
-    { requestInit: { headers: { 'Authorization': `Bearer ${await sandbox.getMcpToken()}` }}}
-)
-await client.connect(transport)
+const mcpUrl = sbx.getMcpUrl()
+const mcpToken = await sbx.getMcpToken()
 
-// Extract from MongoDB
-const mongoData = await client.callTool({
-    name: 'mongodb_find',
-    arguments: { collection: 'users', query: {} }
-})
-
-// Transform (your code)
-const transformed = transformData(mongoData)
-
-// Load to PostgreSQL
-await client.callTool({
-    name: 'postgres_insert',
-    arguments: { table: 'users', data: transformed }
-})
-
-// Cache in Redis
-await client.callTool({
-    name: 'redis_set',
-    arguments: { key: 'users_cache', value: JSON.stringify(transformed) }
-})
-```
-
-### Pattern 3: AI Agent with Tools
-
-LLM-powered agent with MCP tool access:
-
-```python
-from anthropic import Anthropic
-from e2b_code_interpreter import Sandbox
-
-# Create sandbox with MCP servers
-sandbox = Sandbox.create(
-    mcp={
-        'github': {'githubPersonalAccessToken': github_token},
-        'notion': {'internalIntegrationToken': notion_token}
-    }
+// Add MCP gateway to Claude inside the sandbox
+await sbx.commands.run(
+    `claude mcp add --transport http e2b-mcp-gateway ${mcpUrl} --header "Authorization: Bearer ${mcpToken}"`,
+    { timeoutMs: 0, onStdout: console.log, onStderr: console.log }
 )
 
-# Get MCP tools as Claude tools
-mcp_url = sandbox.get_mcp_url()
-mcp_token = sandbox.get_mcp_token()
-
-# Define tools for Claude (simplified example)
-tools = get_mcp_tools_as_claude_tools(mcp_url, mcp_token)
-
-# Create Claude client
-client = Anthropic()
-
-# Agent loop
-while True:
-    response = client.messages.create(
-        model="claude-3-5-sonnet-20240620",
-        max_tokens=1024,
-        messages=messages,
-        tools=tools
-    )
-
-    if response.stop_reason == "tool_use":
-        # Execute tool via MCP
-        tool_use = next(block for block in response.content if block.type == "tool_use")
-        result = call_mcp_tool(mcp_url, mcp_token, tool_use.name, tool_use.input)
-
-        # Continue conversation with result
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": result})
-    else:
-        break
-```
-
-### Pattern 4: Internal Sandbox Access
-
-Access MCP from code running inside the sandbox:
-
-```python
-# This code runs INSIDE the E2B sandbox
-import os
-import requests
-
-# MCP is available at localhost inside sandbox
-MCP_URL = 'http://localhost:50005/mcp'
-MCP_TOKEN = os.environ['E2B_MCP_TOKEN']  # Set when running code
-
-headers = {
-    'Authorization': f'Bearer {MCP_TOKEN}',
-    'Content-Type': 'application/json'
-}
-
-# Query database via MCP
-response = requests.post(
-    f'{MCP_URL}/call_tool',
-    headers=headers,
-    json={
-        'name': 'postgres_query',
-        'arguments': {'query': 'SELECT * FROM products'}
-    }
+// Run Claude with a task
+await sbx.commands.run(
+    `echo 'Research open positions at e2b.dev using browserbase and exa.' | claude -p --dangerously-skip-permissions`,
+    { timeoutMs: 0, onStdout: console.log, onStderr: console.log }
 )
-
-products = response.json()
-print(f"Found {len(products)} products")
 ```
 
-### Pattern 5: Dynamic Tool Discovery
+### Pattern 3: Dynamic Tool Discovery
 
 Discover available tools at runtime:
 
@@ -667,16 +541,6 @@ Discover available tools at runtime:
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-// Create sandbox with MCP servers
-const sandbox = await Sandbox.create({
-    mcp: {
-        github: { githubPersonalAccessToken: process.env.GITHUB_TOKEN },
-        slack: { botToken: process.env.SLACK_BOT_TOKEN },
-        notion: { internalIntegrationToken: process.env.NOTION_TOKEN }
-    }
-})
-
-// Connect MCP client
 const client = new Client({ name: 'dynamic-agent', version: '1.0.0' })
 const transport = new StreamableHTTPClientTransport(
     new URL(sandbox.getMcpUrl()),
@@ -691,7 +555,7 @@ const tools = toolsResult.tools
 // Group by provider
 const byProvider = {}
 for (const tool of tools) {
-    const provider = tool.name.split('_')[0]  // e.g., 'github' from 'github_create_issue'
+    const provider = tool.name.split('_')[0]
     if (!byProvider[provider]) byProvider[provider] = []
     byProvider[provider].push(tool)
 }
@@ -700,10 +564,6 @@ console.log('Available tools by provider:')
 for (const [provider, providerTools] of Object.entries(byProvider)) {
     console.log(`  ${provider}: ${providerTools.length} tools`)
 }
-
-// Now use tools dynamically based on user intent
-const userRequest = "Create a GitHub issue and notify Slack"
-const toolsToUse = selectToolsForRequest(userRequest, tools)
 ```
 
 ## Troubleshooting
@@ -720,7 +580,7 @@ const toolsToUse = selectToolsForRequest(userRequest, tools)
 
 2. Check authentication token:
    ```python
-   token = sandbox.get_mcp_token()
+   token = await sandbox.get_mcp_token()
    print(f"Token length: {len(token)}")
    ```
 
@@ -742,268 +602,51 @@ const toolsToUse = selectToolsForRequest(userRequest, tools)
 
 2. Verify token hasn't expired (recreate sandbox if needed)
 
-3. Check that the token matches the sandbox:
-   ```python
-   # Token is sandbox-specific
-   sandbox1 = Sandbox.create(mcp={...})
-   token1 = sandbox1.get_mcp_token()
-
-   # This won't work - wrong token
-   sandbox2 = Sandbox.create(mcp={...})
-   # Using token1 with sandbox2.get_mcp_url() will fail
-   ```
+3. Check that the token matches the sandbox (tokens are sandbox-specific)
 
 ### Missing Tools
 
 **Problem**: Expected tools not available when listing
 
 **Solutions**:
-1. Verify MCP servers were enabled at sandbox creation:
-   ```python
-   # Must pass mcp config when creating
-   sandbox = Sandbox.create(mcp={'github': {...}})
-   ```
-
-2. Check server configuration is correct:
-   ```python
-   # Each server has required configuration fields
-   sandbox = Sandbox.create(
-       mcp={
-           'github': {
-               'githubPersonalAccessToken': token  # Required!
-           }
-       }
-   )
-   ```
-
-3. List tools to see what's actually available:
-   ```javascript
-   const tools = await client.listTools()
-   console.log('Available:', tools.tools.map(t => t.name))
-   ```
-
-### Configuration Errors
-
-**Problem**: MCP server fails to start due to invalid configuration
-
-**Solutions**:
-1. Review required configuration fields for each server (see Available Servers section)
-
-2. Validate credentials before passing to sandbox:
-   ```python
-   import os
-
-   # Check required env vars exist
-   required = ['GITHUB_TOKEN', 'SLACK_BOT_TOKEN']
-   missing = [key for key in required if not os.environ.get(key)]
-   if missing:
-       raise ValueError(f"Missing env vars: {missing}")
-
-   sandbox = Sandbox.create(mcp={...})
-   ```
-
-3. Test server configuration independently if possible
+1. Verify MCP servers were enabled at sandbox creation
+2. Check server configuration is correct (each server has required fields)
+3. List tools to see what's actually available
 
 ### Timeout Issues
 
 **Problem**: MCP tool calls timing out
 
 **Solutions**:
-1. Increase sandbox timeout:
-   ```python
-   sandbox = Sandbox.create(
-       timeout=300,  # 5 minutes
-       mcp={...}
-   )
-   ```
-
-2. Check network connectivity from sandbox:
-   ```python
-   # Test if external service is reachable
-   sandbox.run_code('''
-   import requests
-   response = requests.get("https://api.github.com/status")
-   print(response.status_code)
-   ''')
-   ```
-
+1. Increase sandbox timeout
+2. Check network connectivity from sandbox
 3. Use async operations where possible
-
-### Tool Call Failures
-
-**Problem**: Tool calls return errors
-
-**Solutions**:
-1. Check tool input schema:
-   ```javascript
-   const tools = await client.listTools()
-   const tool = tools.tools.find(t => t.name === 'github_create_issue')
-   console.log('Input schema:', tool.inputSchema)
-   ```
-
-2. Validate arguments match schema:
-   ```python
-   # Ensure all required fields are provided
-   result = client.call_tool(
-       name='postgres_query',
-       arguments={
-           'query': 'SELECT * FROM users'  # Required field
-       }
-   )
-   ```
-
-3. Review error messages in tool response:
-   ```javascript
-   try {
-       const result = await client.callTool({...})
-   } catch (error) {
-       console.error('Tool error:', error.message)
-       console.error('Details:', error.details)
-   }
-   ```
-
-### Rate Limiting
-
-**Problem**: External service rate limits exceeded
-
-**Solutions**:
-1. Implement exponential backoff:
-   ```python
-   import time
-
-   retries = 3
-   for i in range(retries):
-       try:
-           result = call_mcp_tool(...)
-           break
-       except RateLimitError:
-           wait = 2 ** i  # 1s, 2s, 4s
-           time.sleep(wait)
-   ```
-
-2. Cache results when possible:
-   ```python
-   # Use Redis MCP server to cache responses
-   cache_key = f"github_user_{username}"
-
-   # Try cache first
-   cached = redis_get(cache_key)
-   if cached:
-       return cached
-
-   # Fetch and cache
-   result = github_get_user(username)
-   redis_set(cache_key, result, ttl=3600)
-   ```
-
-3. Monitor usage and adjust accordingly
 
 ## Best Practices
 
 ### Security
 
-1. **Never hardcode credentials**:
-   ```python
-   # Bad
-   sandbox = Sandbox.create(
-       mcp={'github': {'githubPersonalAccessToken': 'ghp_abc123'}}
-   )
-
-   # Good
-   import os
-   sandbox = Sandbox.create(
-       mcp={'github': {'githubPersonalAccessToken': os.environ['GITHUB_TOKEN']}}
-   )
-   ```
-
-2. **Use minimal permissions**: Configure API tokens with only required scopes
-
-3. **Rotate credentials regularly**: Especially for production workloads
-
-4. **Isolate per user**: Create separate sandboxes per user/session
+1. **Never hardcode credentials** - use environment variables
+2. **Use minimal permissions** - configure API tokens with only required scopes
+3. **Rotate credentials regularly** - especially for production workloads
+4. **Isolate per user** - create separate sandboxes per user/session
 
 ### Performance
 
-1. **Enable only needed servers**: Don't enable all 200+ servers if you only need a few
-   ```python
-   # Only enable what you need
-   sandbox = Sandbox.create(
-       mcp={
-           'postgres': {'url': db_url},  # Just what's needed
-       }
-   )
-   ```
-
-2. **Reuse sandboxes**: Connect to existing sandboxes instead of creating new ones
-   ```python
-   # Create once
-   sandbox = Sandbox.create(mcp={...})
-   save_sandbox_id(sandbox.sandbox_id)
-
-   # Reconnect later
-   sandbox = Sandbox.connect(saved_id)
-   ```
-
-3. **Use batch operations**: When tools support it, batch multiple operations
-   ```python
-   # Better: Single batch call
-   result = call_tool('postgres_batch_insert', {'data': records})
-
-   # Worse: Multiple individual calls
-   for record in records:
-       call_tool('postgres_insert', {'data': record})
-   ```
+1. **Enable only needed servers** - don't enable all 200+ servers if you only need a few
+2. **Use custom templates** - prepull MCP server images for faster startup
+3. **Reuse sandboxes** - connect to existing sandboxes instead of creating new ones
 
 ### Reliability
 
-1. **Handle errors gracefully**:
-   ```javascript
-   try {
-       const result = await client.callTool({...})
-   } catch (error) {
-       if (error.code === 'RATE_LIMIT') {
-           // Wait and retry
-       } else if (error.code === 'TIMEOUT') {
-           // Handle timeout
-       } else {
-           // Log and alert
-       }
-   }
-   ```
-
-2. **Implement retries**: With exponential backoff for transient failures
-
-3. **Monitor tool availability**: Check that required tools are available before use
-   ```python
-   tools = client.list_tools()
-   required = ['postgres_query', 'slack_send_message']
-   available = [t.name for t in tools.tools]
-
-   if not all(r in available for r in required):
-       raise ValueError("Required tools not available")
-   ```
-
-### Observability
-
-1. **Log MCP operations**:
-   ```python
-   import logging
-
-   logger = logging.getLogger(__name__)
-
-   logger.info(f"Calling MCP tool: {tool_name}")
-   result = call_mcp_tool(tool_name, args)
-   logger.info(f"Tool {tool_name} completed in {elapsed}s")
-   ```
-
-2. **Track metrics**: Tool calls, success rates, latencies
-
-3. **Use MCP Inspector during development**: Debug tool behavior before production
+1. **Handle errors gracefully** - implement try-catch around tool calls
+2. **Implement retries** - with exponential backoff for transient failures
+3. **Monitor tool availability** - check that required tools are available before use
 
 ## Additional Resources
 
 - **E2B Documentation**: https://e2b.dev/docs
 - **MCP Specification**: https://modelcontextprotocol.io
-- **MCP Server Catalog**: https://github.com/modelcontextprotocol/servers
+- **Docker MCP Catalog**: https://hub.docker.com/mcp
 - **E2B Cookbook**: https://github.com/e2b-dev/e2b-cookbook (examples and tutorials)
 - **MCP Inspector**: https://github.com/modelcontextprotocol/inspector

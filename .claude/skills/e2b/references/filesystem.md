@@ -2,17 +2,22 @@
 
 ## Overview
 
-Each E2B Sandbox has an isolated filesystem with:
-- **Hobby tier**: 1 GB free disk space
-- **Pro tier**: 5 GB disk space
+Each E2B Sandbox has its own isolated filesystem.
+- **Hobby tier**: 10 GB free disk space
+- **Pro tier**: 20 GB disk space
 
 The filesystem is completely isolated from other sandboxes and the host system.
 
-## File Operations
+With the E2B SDK you can:
+- Read and write files
+- Get file/directory metadata (info)
+- Watch directories for changes
+- Upload data to the sandbox
+- Download data from the sandbox
 
-### Writing Files
+## Writing Files
 
-Upload files from your local system to the sandbox.
+### Writing a Single File
 
 **Python:**
 ```python
@@ -20,13 +25,12 @@ from e2b_code_interpreter import Sandbox
 
 sandbox = Sandbox.create()
 
-# Read local file
-with open('local/file.csv', 'rb') as f:
-    content = f.read()
+# Write string content
+sandbox.files.write('/path/to/file', 'file content')
 
-# Write to sandbox (use absolute paths)
-file_info = sandbox.files.write('/home/user/data.csv', content)
-print(file_info.path)  # '/home/user/data.csv'
+# Write from a local file (binary)
+with open('path/to/local/file', 'rb') as file:
+    sandbox.files.write('/path/in/sandbox', file)
 ```
 
 **JavaScript:**
@@ -36,49 +40,235 @@ import { Sandbox } from '@e2b/code-interpreter'
 
 const sandbox = await Sandbox.create()
 
-// Read local file
-const content = fs.readFileSync('local/file.csv')
+// Write string content
+await sandbox.files.write('/path/to/file', 'file content')
 
-// Write to sandbox
-const fileInfo = await sandbox.files.write('/home/user/data.csv', content)
-console.log(fileInfo.path)
+// Write from a local file
+const content = fs.readFileSync('/local/path')
+await sandbox.files.write('/path/in/sandbox', content)
 ```
 
-**Important:**
-- Always use absolute paths (start with `/`)
-- Recommended base directory: `/home/user/`
-- File info includes: path, timestamp, size
+### Writing Multiple Files
 
-### Reading Files
+**Python:**
+```python
+from e2b_code_interpreter import Sandbox
+
+sandbox = Sandbox.create()
+
+sandbox.files.write_files([
+    {"path": "/path/to/a", "data": "file content"},
+    {"path": "another/path/to/b", "data": "file content"}
+])
+```
+
+**JavaScript:**
+```javascript
+import { Sandbox } from '@e2b/code-interpreter'
+
+const sandbox = await Sandbox.create()
+
+await sandbox.files.write([
+    { path: '/path/to/a', data: 'file content' },
+    { path: '/another/path/to/b', data: 'file content' }
+])
+```
+
+### Upload Directory / Multiple Files
+
+**Python:**
+```python
+import os
+from e2b_code_interpreter import Sandbox
+
+sandbox = Sandbox.create()
+
+def read_directory_files(directory_path):
+    files = []
+    for filename in os.listdir(directory_path):
+        file_path = os.path.join(directory_path, filename)
+        if os.path.isfile(file_path):
+            with open(file_path, "rb") as file:
+                files.append({
+                    'path': file_path,
+                    'data': file.read()
+                })
+    return files
+
+files = read_directory_files("/local/dir")
+sandbox.files.write_files(files)
+```
+
+**JavaScript:**
+```javascript
+import fs from 'fs'
+import path from 'path'
+import { Sandbox } from '@e2b/code-interpreter'
+
+const sandbox = await Sandbox.create()
+
+const readDirectoryFiles = (directoryPath) => {
+  const files = fs.readdirSync(directoryPath)
+  return files
+    .filter(file => fs.statSync(path.join(directoryPath, file)).isFile())
+    .map(file => {
+      const filePath = path.join(directoryPath, file)
+      return { path: filePath, data: fs.readFileSync(filePath, 'utf8') }
+    })
+}
+
+const files = readDirectoryFiles('/local/dir')
+await sandbox.files.write(files)
+```
+
+## Reading Files
 
 Download files from the sandbox to your local system.
 
 **Python:**
 ```python
 # Read file from sandbox
-content = sandbox.files.read('/home/user/output.png')
+content = sandbox.files.read('/path/in/sandbox')
 
 # Save locally
-with open('local/output.png', 'wb') as f:
-    f.write(content)
+with open('/local/path', 'w') as file:
+    file.write(content)
 ```
 
 **JavaScript:**
 ```javascript
 // Read file from sandbox
-const content = await sandbox.files.read('/home/user/output.png')
+const content = await sandbox.files.read('/path/in/sandbox')
 
 // Save locally
-fs.writeFileSync('local/output.png', content)
+fs.writeFileSync('/local/path', content)
 ```
 
-### Listing Files
+## File and Directory Info (Metadata)
+
+Get detailed information about a file or directory using `files.get_info()` (Python) or `files.getInfo()` (JavaScript).
+
+### Getting File Info
+
+**Python:**
+```python
+from e2b_code_interpreter import Sandbox
+
+sandbox = Sandbox.create()
+
+# Create a file
+sandbox.files.write('test_file.txt', 'Hello, world!')
+
+# Get information about the file
+info = sandbox.files.get_info('test_file.txt')
+
+print(info)
+# EntryInfo(
+#   name='test_file.txt',
+#   type=<FileType.FILE: 'file'>,
+#   path='/home/user/test_file.txt',
+#   size=13,
+#   mode=0o644,
+#   permissions='-rw-r--r--',
+#   owner='user',
+#   group='user',
+#   modified_time='2025-05-26T12:00:00.000Z',
+#   symlink_target=None
+# )
+```
+
+**JavaScript:**
+```javascript
+import { Sandbox } from '@e2b/code-interpreter'
+
+const sandbox = await Sandbox.create()
+
+// Create a file
+await sandbox.files.write('test_file.txt', 'Hello, world!')
+
+// Get information about the file
+const info = await sandbox.files.getInfo('test_file.txt')
+
+console.log(info)
+// {
+//   name: 'test_file.txt',
+//   type: 'file',
+//   path: '/home/user/test_file.txt',
+//   size: 13,
+//   mode: 0o644,
+//   permissions: '-rw-r--r--',
+//   owner: 'user',
+//   group: 'user',
+//   modifiedTime: '2025-05-26T12:00:00.000Z',
+//   symlinkTarget: null
+// }
+```
+
+### Getting Directory Info
+
+**Python:**
+```python
+sandbox.files.make_dir('test_dir')
+
+info = sandbox.files.get_info('test_dir')
+
+print(info)
+# EntryInfo(
+#   name='test_dir',
+#   type=<FileType.DIR: 'dir'>,
+#   path='/home/user/test_dir',
+#   size=0,
+#   mode=0o755,
+#   permissions='drwxr-xr-x',
+#   owner='user',
+#   group='user',
+#   modified_time='2025-05-26T12:00:00.000Z',
+#   symlink_target=None
+# )
+```
+
+**JavaScript:**
+```javascript
+await sandbox.files.makeDir('test_dir')
+
+const info = await sandbox.files.getInfo('test_dir')
+
+console.log(info)
+// {
+//   name: 'test_dir',
+//   type: 'dir',
+//   path: '/home/user/test_dir',
+//   size: 0,
+//   mode: 0o755,
+//   permissions: 'drwxr-xr-x',
+//   owner: 'user',
+//   group: 'user',
+//   modifiedTime: '2025-05-26T12:00:00.000Z',
+//   symlinkTarget: null
+// }
+```
+
+### Info Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | File or directory name |
+| `type` | string | `'file'` or `'dir'` |
+| `path` | string | Absolute path |
+| `size` | number | Size in bytes (0 for directories) |
+| `mode` | number | Unix file mode (e.g., 0o644) |
+| `permissions` | string | Human-readable permissions (e.g., `-rw-r--r--`) |
+| `owner` | string | File owner |
+| `group` | string | File group |
+| `modified_time` / `modifiedTime` | string | ISO 8601 modification timestamp |
+| `symlink_target` / `symlinkTarget` | string or null | Target path if symlink, null otherwise |
+
+## Listing Files
 
 List files and directories in the sandbox.
 
 **Python:**
 ```python
-# List files in directory
 files = sandbox.files.list('/home/user')
 
 for file in files:
@@ -90,7 +280,6 @@ for file in files:
 
 **JavaScript:**
 ```javascript
-// List files in directory
 const files = await sandbox.files.list('/home/user')
 
 for (const file of files) {
@@ -101,7 +290,7 @@ for (const file of files) {
 }
 ```
 
-### Deleting Files
+## Deleting Files
 
 **Python:**
 ```python
@@ -121,104 +310,176 @@ await sandbox.files.remove('/home/user/temp.txt')
 await sandbox.files.remove('/home/user/temp_dir')
 ```
 
-## Working with Multiple Files
-
-### Uploading Multiple Files
-
-Currently, files must be uploaded individually. E2B is working on batch operations.
+## Making Directories
 
 **Python:**
 ```python
-files_to_upload = {
-    '/home/user/file-a.csv': content_a,
-    '/home/user/file-b.csv': content_b,
-    '/home/user/file-c.csv': content_c,
-}
-
-for path, content in files_to_upload.items():
-    sandbox.files.write(path, content)
-    print(f"Uploaded: {path}")
+sandbox.files.make_dir('test_dir')
 ```
 
 **JavaScript:**
 ```javascript
-const filesToUpload = {
-    '/home/user/file-a.csv': contentA,
-    '/home/user/file-b.csv': contentB,
-    '/home/user/file-c.csv': contentC,
-}
-
-for (const [path, content] of Object.entries(filesToUpload)) {
-    await sandbox.files.write(path, content)
-    console.log(`Uploaded: ${path}`)
-}
-```
-
-### Downloading Multiple Files
-
-**Python:**
-```python
-files_to_download = [
-    '/home/user/output-a.png',
-    '/home/user/output-b.png',
-]
-
-for remote_path in files_to_download:
-    content = sandbox.files.read(remote_path)
-    local_path = remote_path.replace('/home/user/', 'local/')
-    with open(local_path, 'wb') as f:
-        f.write(content)
-    print(f"Downloaded: {local_path}")
-```
-
-### Directory Operations
-
-**Create Directory:**
-```python
-# Use bash command
-sandbox.commands.run('mkdir -p /home/user/data/raw')
-```
-
-**List Directory Recursively:**
-```python
-# Use bash command
-result = sandbox.commands.run('find /home/user -type f')
-print(result.stdout)
+await sandbox.files.makeDir('test_dir')
 ```
 
 ## Watching Filesystem Changes
 
-Monitor directories for changes in real-time.
+Monitor directories for changes in real-time using `files.watch_dir()` (Python) or `files.watchDir()` (JavaScript).
+
+**Important:** Since events are tracked asynchronously, their delivery may be delayed. It is recommended not to collect or close a watcher immediately after making a change.
+
+### Basic Watch
 
 **Python:**
 ```python
+from e2b_code_interpreter import Sandbox, FilesystemEventType
+
+sandbox = Sandbox.create()
+dirname = '/home/user'
+
 # Watch directory for changes
-def on_change(event):
-    print(f"File changed: {event.path}")
-    print(f"Event type: {event.type}")
+handle = sandbox.files.watch_dir(dirname)
 
-watcher = sandbox.files.watch('/home/user/outputs', on_change)
+# Trigger file write event
+sandbox.files.write(f"{dirname}/my-file", "hello")
 
-# Do work that creates files
-sandbox.run_code(code_that_creates_files)
-
-# Stop watching
-watcher.stop()
+# Retrieve the latest new events since the last get_new_events() call
+events = handle.get_new_events()
+for event in events:
+    print(event)
+    if event.type == FilesystemEventType.WRITE:
+        print(f"wrote to file {event.name}")
 ```
 
 **JavaScript:**
 ```javascript
-// Watch directory for changes
-const watcher = await sandbox.files.watch('/home/user/outputs', (event) => {
-    console.log(`File changed: ${event.path}`)
-    console.log(`Event type: ${event.type}`)
+import { Sandbox, FilesystemEventType } from '@e2b/code-interpreter'
+
+const sandbox = await Sandbox.create()
+const dirname = '/home/user'
+
+// Start watching directory for changes
+const handle = await sandbox.files.watchDir(dirname, async (event) => {
+    console.log(event)
+    if (event.type === FilesystemEventType.WRITE) {
+        console.log(`wrote to file ${event.name}`)
+    }
 })
 
-// Do work that creates files
-await sandbox.runCode(codeThereateFiles)
+// Trigger file write event
+await sandbox.files.write(`${dirname}/my-file`, 'hello')
+```
 
-// Stop watching
-await watcher.stop()
+### Recursive Watching
+
+Enable recursive watching using the `recursive` parameter.
+
+**Note:** When rapidly creating new folders (e.g., deeply nested path of folders), events other than `CREATE` might not be emitted. To avoid this behavior, create the required folder structure in advance.
+
+**Python:**
+```python
+handle = sandbox.files.watch_dir(dirname, recursive=True)
+sandbox.files.write(f"{dirname}/my-folder/my-file", "hello")
+
+events = handle.get_new_events()
+for event in events:
+    print(event)
+    if event.type == FilesystemEventType.WRITE:
+        print(f"wrote to file {event.name}")
+```
+
+**JavaScript:**
+```javascript
+const handle = await sandbox.files.watchDir(dirname, async (event) => {
+    console.log(event)
+    if (event.type === FilesystemEventType.WRITE) {
+        console.log(`wrote to file ${event.name}`)
+    }
+}, {
+    recursive: true
+})
+
+await sandbox.files.write(`${dirname}/my-folder/my-file`, 'hello')
+```
+
+## Pre-signed URLs for Upload and Download
+
+For use cases where you need to let users from unauthorized environments (like a browser) upload or download files, you can use pre-signed URLs. This requires creating a sandbox with `secure: true`.
+
+### Download with Pre-signed URL
+
+**Python:**
+```python
+from e2b import Sandbox
+
+sandbox = Sandbox.create(timeout=12_000, secure=True)
+
+# Create a pre-signed URL for file download with a 10-second expiration
+signed_url = sandbox.download_url(
+    path="demo.txt",
+    user="user",
+    use_signature_expiration=10_000
+)
+# The user only has to visit the URL to download the file
+```
+
+**JavaScript:**
+```javascript
+import { Sandbox } from '@e2b/code-interpreter'
+
+const sandbox = await Sandbox.create(template, { secure: true })
+
+// Create a pre-signed URL for file download with a 10-second expiration
+const publicUrl = await sandbox.downloadUrl('demo.txt', {
+    useSignatureExpiration: 10_000, // optional
+})
+
+// Download a file with a pre-signed URL (works in a browser)
+const res = await fetch(publicUrl)
+const content = await res.text()
+```
+
+### Upload with Pre-signed URL
+
+**Python:**
+```python
+from e2b import Sandbox
+import requests
+
+sandbox = Sandbox.create(timeout=12_000, secure=True)
+
+# Create a pre-signed URL for file upload with a 10-second expiration
+signed_url = sandbox.upload_url(
+    path="demo.txt",
+    user="user",
+    use_signature_expiration=10_000
+)
+
+form_data = {"file": "file content"}
+requests.post(signed_url, data=form_data)
+
+# File is now available in the sandbox
+content = sandbox.files.read('/path/in/sandbox')
+```
+
+**JavaScript:**
+```javascript
+import { Sandbox } from '@e2b/code-interpreter'
+
+const sandbox = await Sandbox.create(template, { secure: true })
+
+// Create a pre-signed URL for file upload with a 10-second expiration
+const publicUploadUrl = await sandbox.uploadUrl('demo.txt', {
+    useSignatureExpiration: 10_000, // optional
+})
+
+// Upload a file with a pre-signed URL (works in a browser)
+const form = new FormData()
+form.append('file', 'file content')
+await fetch(publicUploadUrl, { method: 'POST', body: form })
+
+// File is now available in the sandbox
+const content = sandbox.files.read('/path/in/sandbox')
 ```
 
 ## File Paths Best Practices
@@ -237,13 +498,13 @@ sandbox.files.write('data.csv', content)
 
 ```
 /home/user/
-├── data/           # Input datasets
-│   ├── raw/
-│   └── processed/
-├── outputs/        # Generated files
-│   ├── charts/
-│   └── reports/
-└── scripts/        # Code files
+  data/           # Input datasets
+    raw/
+    processed/
+  outputs/        # Generated files
+    charts/
+    reports/
+  scripts/        # Code files
 ```
 
 ### Creating the Structure
@@ -265,8 +526,7 @@ mkdir -p /home/user/scripts
 ```python
 # 1. Upload dataset
 with open('sales_data.csv', 'rb') as f:
-    content = f.read()
-sandbox.files.write('/home/user/data/sales.csv', content)
+    sandbox.files.write('/home/user/data/sales.csv', f)
 
 # 2. Run analysis
 code = """
@@ -314,8 +574,7 @@ result = sandbox.files.read('/home/user/outputs/combined.csv')
 ```python
 # Upload image for processing
 with open('input.jpg', 'rb') as f:
-    image_data = f.read()
-sandbox.files.write('/home/user/image.jpg', image_data)
+    sandbox.files.write('/home/user/image.jpg', f)
 
 # Process image
 code = """
@@ -339,12 +598,10 @@ with open('output.jpg', 'wb') as f:
 
 ```python
 # Write text file
-text = "Hello, World!"
-sandbox.files.write('/home/user/message.txt', text.encode('utf-8'))
+sandbox.files.write('/home/user/message.txt', 'Hello, World!')
 
 # Read text file
 content = sandbox.files.read('/home/user/message.txt')
-text = content.decode('utf-8')
 ```
 
 ### CSV Files
@@ -353,14 +610,13 @@ text = content.decode('utf-8')
 import csv
 import io
 
-# Create CSV
 output = io.StringIO()
 writer = csv.writer(output)
 writer.writerow(['Name', 'Age'])
 writer.writerow(['Alice', 30])
 csv_content = output.getvalue()
 
-sandbox.files.write('/home/user/data.csv', csv_content.encode('utf-8'))
+sandbox.files.write('/home/user/data.csv', csv_content)
 ```
 
 ### JSON Files
@@ -368,14 +624,12 @@ sandbox.files.write('/home/user/data.csv', csv_content.encode('utf-8'))
 ```python
 import json
 
-# Write JSON
 data = {'name': 'Alice', 'age': 30}
 json_str = json.dumps(data)
-sandbox.files.write('/home/user/data.json', json_str.encode('utf-8'))
+sandbox.files.write('/home/user/data.json', json_str)
 
-# Read JSON
 content = sandbox.files.read('/home/user/data.json')
-data = json.loads(content.decode('utf-8'))
+data = json.loads(content)
 ```
 
 ## Troubleshooting
@@ -398,7 +652,6 @@ else:
 Files in `/home/user/` should always be writable. If you get permission errors:
 
 ```python
-# Fix permissions
 sandbox.commands.run('chmod -R 755 /home/user')
 ```
 
@@ -410,7 +663,6 @@ For files larger than 10MB, consider:
 3. Processing in chunks
 
 ```python
-# Download large file in sandbox
 code = """
 import urllib.request
 url = 'https://example.com/large-dataset.csv'
@@ -424,7 +676,6 @@ sandbox.run_code(code)
 Monitor disk usage:
 
 ```python
-# Check disk usage
 result = sandbox.commands.run('df -h /home/user')
 print(result.stdout)
 
