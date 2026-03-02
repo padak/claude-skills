@@ -1,0 +1,17 @@
+{
+	"name": "swarm-plugins",
+	"owner": {
+		"name": "chocho"
+	},
+	"metadata": {
+		"description": "Multi-agent orchestration plugins for Claude Code"
+	},
+	"plugins": [
+		{
+			"name": "swarm",
+			"source": "./plugins/swarm",
+			"description": "Multi-agent implementation orchestrator using Tech Lead + DevAgent pattern with git worktrees for parallel execution",
+			"version": "1.0.0"
+		}
+	]
+}
