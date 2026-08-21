@@ -5,23 +5,44 @@ description: "Get second opinion from OpenAI (Codex), Google (Gemini), or Anthro
 
 # Second Opinion via Codex, Gemini & Claude Code CLI
 
-Get external AI perspective from OpenAI (via Codex CLI), Google (via Gemini CLI), or Anthropic (via Claude Code CLI) to validate decisions or compare approaches.
+Get external AI perspective from OpenAI (Codex CLI), Google (Gemini CLI), or
+Anthropic (Claude Code CLI) to validate decisions or compare approaches.
+
+## Model Cheat Sheet (August 2026)
+
+| Provider | Deep / frontier | Balanced (default) | Fast & cheap |
+|----------|-----------------|--------------------|--------------|
+| Codex (OpenAI) | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` |
+| Gemini (Google) | `gemini-3.1-pro-preview` | auto-routing (omit `-m`) | `gemini-3-flash-preview` |
+| Claude Code (Anthropic) | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5-20251001` |
+
+Also available on Codex: `gpt-5.5` (frontier, non-agentic focus), `gpt-5.4` /
+`gpt-5.4-mini` (previous gen), `gpt-5.3-codex-spark` (ultra-fast). The GPT-5.6
+family (Sol / Terra / Luna) is the current agentic coding lineup. Verify with
+the live registry when in doubt: `python3 -c "import json; [print(m['slug'])
+for m in json.load(open('$HOME/.codex/models_cache.json'))['models']]"`.
 
 ## Quick Patterns
 
-### Using Codex (OpenAI)
+### Codex (OpenAI)
 
-#### Simple Question
 ```bash
-codex exec -m gpt-5.3-codex --output-last-message /tmp/claude/answer.txt "Your question here"
+# Simple question (Terra = balanced default)
+codex exec -m gpt-5.6-terra --output-last-message /tmp/claude/answer.txt "Your question here"
 cat /tmp/claude/answer.txt
+
+# Deep review with high reasoning effort (Sol)
+codex exec -m gpt-5.6-sol -c model_reasoning_effort="high" \
+  --output-last-message /tmp/claude/answer.txt "Your question here"
 ```
 
-#### Structured Analysis (Recommended)
+Reasoning effort levels: `low`, `medium`, `high`, `xhigh`, `max` (Sol also
+supports `ultra`). Set via `-c model_reasoning_effort="..."`.
 
-**IMPORTANT:** When using `--output-schema`, ALL objects (including nested ones) must have:
-- `"additionalProperties": false`
-- `"required": [...]` with all property names
+#### Structured output with schema (Codex only)
+
+**IMPORTANT:** With `--output-schema`, ALL objects (including nested ones) must have
+`"additionalProperties": false` and `"required": [...]` listing every property.
 
 ```bash
 cat > /tmp/claude/schema.json << 'EOF'
@@ -38,267 +59,105 @@ cat > /tmp/claude/schema.json << 'EOF'
 }
 EOF
 
-codex exec -m gpt-5.3-codex --output-schema /tmp/claude/schema.json \
+codex exec -m gpt-5.6-terra --output-schema /tmp/claude/schema.json \
   --output-last-message /tmp/claude/result.json \
   "Analyze [topic]. Provide structured assessment."
-
 cat /tmp/claude/result.json
 ```
 
-### Nested Objects Example
-```bash
-# Nested objects MUST also have additionalProperties: false
-cat > /tmp/claude/nested_schema.json << 'EOF'
-{
-  "type": "object",
-  "properties": {
-    "summary": { "type": "string" },
-    "details": {
-      "type": "object",
-      "properties": {
-        "score": { "type": "string" },
-        "items": { "type": "array", "items": { "type": "string" } }
-      },
-      "required": ["score", "items"],
-      "additionalProperties": false
-    }
-  },
-  "required": ["summary", "details"],
-  "additionalProperties": false
-}
-EOF
-```
+### Gemini (Google)
 
-### Using Gemini (Google)
+**WARNING (Aug 2026):** Gemini CLI no longer works with personal Google OAuth
+("This client is no longer supported for Gemini Code Assist for individuals —
+migrate to Antigravity"). It requires `GEMINI_API_KEY` (or a Workspace / Code
+Assist license). If neither is available, skip the Gemini leg and use Codex +
+Claude only.
 
-#### Simple Question
 ```bash
+# Auto-routing picks the model (recommended default)
 gemini -p "Your question here" --output-format text > /tmp/claude/answer.txt
-cat /tmp/claude/answer.txt
-```
 
-#### JSON Output
-```bash
+# Explicit model
+gemini -m gemini-3.1-pro-preview -p "Your question here" --output-format text > /tmp/claude/answer.txt
+
+# JSON output (no schema validation — describe the shape in the prompt)
 gemini -p "Analyze [topic]. Respond in JSON with: assessment (string), strengths (array), concerns (array), recommendation (string)" \
   --output-format json > /tmp/claude/result.json
-cat /tmp/claude/result.json
 ```
 
-**Note:** Gemini CLI doesn't support JSON Schema validation like Codex. For strict structured output, use Codex with `--output-schema`.
+### Claude Code (Anthropic)
 
-### Using Claude Code (Anthropic)
-
-#### Simple Question
 ```bash
-claude -p "Your question here" --model claude-opus-4-6 --output-format text > /tmp/claude/answer.txt
-cat /tmp/claude/answer.txt
+# Opus 5 for deep review
+claude -p "Your question here" --model claude-opus-5 --output-format text > /tmp/claude/answer.txt
+
+# Sonnet 5 balanced / Haiku 4.5 cheap
+claude -p "Your question here" --model claude-sonnet-5 --output-format text > /tmp/claude/answer.txt
 ```
 
-#### JSON Output
-```bash
-claude -p "Analyze [topic]. Respond in JSON with: assessment (string), strengths (array), concerns (array), recommendation (string)" \
-  --model claude-opus-4-6 --output-format json > /tmp/claude/result.json
-cat /tmp/claude/result.json
-```
+The spawned instance runs independently without access to the current session
+context — a genuinely fresh perspective. `--output-format json` wraps the
+response in a structured message object.
 
-#### With Cheaper Model (Simple Tasks)
-```bash
-claude -p "Your question here" --model claude-sonnet-4-5-20250929 --output-format text > /tmp/claude/answer.txt
-cat /tmp/claude/answer.txt
-```
+## Prompt Templates (any provider)
 
-**Note:** Claude Code CLI uses `--print` (`-p`) for non-interactive mode. The spawned instance runs independently without access to the current session context, providing a genuinely fresh perspective. JSON output via `--output-format json` wraps the response in a structured message object.
+Substitute into any Quick Pattern above:
 
-## Use Cases
+- **Architecture review:** "Review this architecture decision: [description]. Assess: scalability, maintainability, security risks, alternatives."
+- **Security audit:** "Security review of [file/code]: input validation, authentication/authorization, data exposure risks. Provide specific vulnerabilities and fixes."
+- **Code review:** "Review [file] for: bugs, performance issues, maintainability. Provide line-level recommendations."
 
-### Architecture Review
-
-**Codex:**
-```bash
-codex exec -m gpt-5.3-codex --output-last-message /tmp/claude/arch.txt \
-  "Review this architecture decision: [description].
-   Assess: scalability, maintainability, security risks, alternatives."
-cat /tmp/claude/arch.txt
-```
-
-**Gemini:**
-```bash
-gemini -p "Review this architecture decision: [description].
-  Assess: scalability, maintainability, security risks, alternatives." \
-  --output-format text > /tmp/claude/arch.txt
-cat /tmp/claude/arch.txt
-```
-
-**Claude Code:**
-```bash
-claude -p "Review this architecture decision: [description].
-  Assess: scalability, maintainability, security risks, alternatives." \
-  --model claude-opus-4-6 --output-format text > /tmp/claude/arch.txt
-cat /tmp/claude/arch.txt
-```
-
-### Security Audit
-
-**Codex:**
-```bash
-codex exec -m gpt-5.3-codex --output-last-message /tmp/claude/security.txt \
-  "Security review of [file/code]:
-   - Input validation
-   - Authentication/authorization
-   - Data exposure risks
-   Provide specific vulnerabilities and fixes."
-cat /tmp/claude/security.txt
-```
-
-**Gemini:**
-```bash
-gemini -p "Security review of [file/code]:
-  - Input validation
-  - Authentication/authorization
-  - Data exposure risks
-  Provide specific vulnerabilities and fixes." \
-  --output-format text > /tmp/claude/security.txt
-cat /tmp/claude/security.txt
-```
-
-**Claude Code:**
-```bash
-claude -p "Security review of [file/code]:
-  - Input validation
-  - Authentication/authorization
-  - Data exposure risks
-  Provide specific vulnerabilities and fixes." \
-  --model claude-opus-4-6 --output-format text > /tmp/claude/security.txt
-cat /tmp/claude/security.txt
-```
-
-### Code Review
-
-**Codex:**
-```bash
-codex exec -m gpt-5.3-codex --output-last-message /tmp/claude/review.txt \
-  "Review [file] for: bugs, performance issues, maintainability.
-   Provide line-level recommendations."
-cat /tmp/claude/review.txt
-```
-
-**Gemini:**
-```bash
-gemini -p "Review [file] for: bugs, performance issues, maintainability.
-  Provide line-level recommendations." \
-  --output-format text > /tmp/claude/review.txt
-cat /tmp/claude/review.txt
-```
-
-**Claude Code:**
-```bash
-claude -p "Review [file] for: bugs, performance issues, maintainability.
-  Provide line-level recommendations." \
-  --model claude-opus-4-6 --output-format text > /tmp/claude/review.txt
-cat /tmp/claude/review.txt
-```
+Pick the deep-tier model (Sol / 3.1-pro / Opus 5) for architecture and
+security; the fast tier (Luna / flash / Haiku) is fine for quick code review.
 
 ## Key Options
 
-### Codex CLI Options
-
-| Option | Purpose |
-|--------|---------|
-| `-m gpt-5.3-codex` | Best model (recommended) |
-| `-m o4-mini` | Faster, cheaper for simple tasks |
-| `--output-schema file.json` | Structured JSON with schema validation |
-| `--output-last-message file.txt` | Save response to file |
-| `-i image.png` | Include image for analysis |
-
-### Gemini CLI Options
-
-| Option | Purpose |
-|--------|---------|
-| `--model gemini-3-pro-preview` | Best reasoning (explicit selection) |
-| `--model gemini-3-flash-preview` | Fast and capable |
-| Auto-routing (default) | CLI selects best model automatically |
-| `--output-format text` | Plain text output |
-| `--output-format json` | JSON output (no schema validation) |
-| `-p "prompt"` | Non-interactive mode (required) |
-
-### Claude Code CLI Options
-
-| Option | Purpose |
-|--------|---------|
-| `--model claude-opus-4-6` | Most capable model (recommended) |
-| `--model claude-sonnet-4-5-20250929` | Balanced speed and quality |
-| `--model claude-haiku-4-5-20251001` | Fastest, cheapest for simple tasks |
-| `--output-format text` | Plain text output (recommended) |
-| `--output-format json` | JSON message object output |
-| `--output-format stream-json` | Streaming JSON output |
-| `-p "prompt"` | Non-interactive print mode (required) |
-| `--max-turns N` | Limit agentic turns (default: no limit) |
-
-## Provider Comparison
-
-| Use Case | Codex (OpenAI) | Gemini (Google) | Claude Code (Anthropic) |
-|----------|---------------|-----------------|------------------------|
-| Complex architectural review | `gpt-5.3-codex` | `gemini-3-pro-preview` or auto | `claude-opus-4-6` |
-| Fast code review | `o4-mini` | `gemini-3-flash-preview` or auto | `claude-haiku-4-5-20251001` |
-| Security audit (deep) | `gpt-5.3-codex` | Auto-routing (recommended) | `claude-opus-4-6` |
-| Structured output (schema) | `gpt-5.3-codex` + schema | N/A (no schema support) | N/A (no schema support) |
-| Balanced quality/speed | `gpt-5.3-codex` | Auto-routing | `claude-opus-4-6` |
-| Multi-provider consensus | All three! Run all and compare | All three! Run all and compare | All three! Run all and compare |
+| CLI | Option | Purpose |
+|-----|--------|---------|
+| codex | `-m <model>` | Model selection (see cheat sheet) |
+| codex | `-c model_reasoning_effort="high"` | Reasoning depth (low..max) |
+| codex | `--output-schema file.json` | Structured JSON with schema validation |
+| codex | `--output-last-message file.txt` | Save final response to file |
+| codex | `-i image.png` | Include image for analysis |
+| gemini | `-m <model>` | Explicit model (default: auto-routing) |
+| gemini | `-p "prompt"` | Non-interactive mode (required) |
+| gemini | `--output-format text\|json\|stream-json` | Output format |
+| claude | `--model <model>` | Model selection |
+| claude | `-p "prompt"` | Non-interactive print mode (required) |
+| claude | `--output-format text\|json\|stream-json` | Output format |
+| claude | `--max-turns N` | Limit agentic turns |
 
 ## Presenting Results
 
-1. Label clearly which provider was used:
-   - "Second opinion (OpenAI/Codex - gpt-5.3-codex)"
-   - "Second opinion (Google/Gemini - gemini-3-pro)"
-   - "Second opinion (Anthropic/Claude Code - claude-opus-4-6)"
-   - "Consensus (Codex + Gemini + Claude Code)" if using all three
+1. Label which provider and model was used, e.g. "Second opinion (OpenAI/Codex - gpt-5.6-sol)"
 2. Compare with your own analysis
 3. Highlight areas of agreement and disagreement
-4. Synthesize recommendation based on multiple perspectives
-5. Optional: Get consensus by asking all providers and comparing outputs
+4. Synthesize a recommendation based on the perspectives
+
+## Multi-Provider Consensus
+
+```bash
+Q="Should we use Redis or PostgreSQL for session storage in an e-commerce app?"
+
+codex exec -m gpt-5.6-terra --output-last-message /tmp/claude/codex_opinion.txt "$Q"
+gemini -p "$Q" --output-format text > /tmp/claude/gemini_opinion.txt
+claude -p "$Q" --model claude-opus-5 --output-format text > /tmp/claude/claude_opinion.txt
+
+for f in codex gemini claude; do echo "=== $f ==="; cat /tmp/claude/${f}_opinion.txt; echo; done
+```
+
+Run providers in parallel (background jobs or parallel tool calls) — each call
+can take tens of seconds. Analyze agreement/disagreement and synthesize.
 
 ## Prerequisites
 
-Verify CLIs are available before use:
 ```bash
-# Check Codex
 codex --version || echo "Codex CLI not installed"
-
-# Check Gemini
 gemini --version || echo "Gemini CLI not installed"
-
-# Check Claude Code
 claude --version || echo "Claude Code CLI not installed"
 ```
 
 **Authentication:**
-- **Codex:** `codex login` or set `OPENAI_API_KEY` env var
-- **Gemini:** Already authenticated via Google OAuth or set `GEMINI_API_KEY` env var
-- **Claude Code:** Already authenticated via `claude login` or set `ANTHROPIC_API_KEY` env var
-
-## Multi-Provider Consensus Example
-
-Get second opinions from all three providers and compare:
-
-```bash
-# 1. Ask Codex
-codex exec -m gpt-5.3-codex --output-last-message /tmp/claude/codex_opinion.txt \
-  "Should we use Redis or PostgreSQL for session storage in e-commerce app?"
-
-# 2. Ask Gemini
-gemini -p "Should we use Redis or PostgreSQL for session storage in e-commerce app?" \
-  --output-format text > /tmp/claude/gemini_opinion.txt
-
-# 3. Ask Claude Code
-claude -p "Should we use Redis or PostgreSQL for session storage in e-commerce app?" \
-  --model claude-opus-4-6 --output-format text > /tmp/claude/claude_opinion.txt
-
-# 4. Compare outputs
-echo "=== Codex (OpenAI) ===" && cat /tmp/claude/codex_opinion.txt
-echo ""
-echo "=== Gemini (Google) ===" && cat /tmp/claude/gemini_opinion.txt
-echo ""
-echo "=== Claude Code (Anthropic) ===" && cat /tmp/claude/claude_opinion.txt
-```
-
-Analyze agreement/disagreement across all three providers and synthesize final recommendation.
+- **Codex:** `codex login` or `OPENAI_API_KEY` env var
+- **Gemini:** `GEMINI_API_KEY` env var required (personal OAuth was discontinued in favor of Antigravity)
+- **Claude Code:** `claude login` or `ANTHROPIC_API_KEY` env var
