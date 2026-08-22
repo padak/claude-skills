@@ -22,15 +22,15 @@ Hooks that run automatically:
 
 | Skill | Trigger | What it does |
 |-------|---------|--------------|
-| **Browser** | `/browser` | Debug-first browser automation via Playwright - every page load captures console errors, failed requests, network stats |
 | **claude-agent-sdk** | `/claude-agent-sdk` | Reference for building apps with Claude Agent SDK (TypeScript/Python) |
 | **e2b** | `/e2b` | Execute code in secure E2B cloud sandboxes with MCP gateway |
 | **keboola-data-app** | `/keboola-data-app` | Streamlit + Google Sheets patterns for Keboola data apps |
 | **polymarket** | `/polymarket` | Build trading bots on Polymarket (py-clob-client SDK, WebSocket, order placement) |
-| **post-merge** | `/post-merge` | After merging a PR: switch to main, pull, delete branch, watch CI/CD |
-| **second-opinion** | `/second-opinion` | Get external AI review from OpenAI via Codex CLI |
-| **skill-creator** | `/skill-creator` | Guide for creating new Claude Code skills |
-| **swarm** | `/swarm` | Multi-agent implementation: Tech Lead spawns Developer agents per phase, reviews PRs, handles retries |
+| **post-merge** | `/post-merge` | After merging a PR: sync main, remove the merged worktree/branch, watch CI/CD. Worktree-aware (works from `.claude/worktrees` sessions) |
+| **second-opinion** | `/second-opinion` | External AI review via Codex (GPT-5.6 Sol/Terra/Luna), Gemini, or Claude Code CLI - single provider or multi-model consensus |
+| **swarm** | `/swarm` | Multi-agent implementation: Tech Lead spawns Developer agents in isolated git worktrees per phase, reviews PRs, handles retries |
+
+Removed in the 2026-08 facelift: **Browser** (Playwright-based, superseded by Claude Code's built-in browser and the Claude Chrome MCP) and **skill-creator** (superseded by the official `anthropic-skills:skill-creator` plugin).
 
 ### `CLAUDE.md` - Global Instructions
 

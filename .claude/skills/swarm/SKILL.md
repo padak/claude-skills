@@ -1,11 +1,13 @@
 ---
 name: swarm
-description: Orchestrated multi-agent implementation using Tech Lead + Developer pattern. Use when implementing phased plans from docs/PLAN.md. Triggers: /swarm, "implement the plan", "run phased implementation", "execute PLAN.md phases". Spawns Developer agents for each phase, reviews PRs, handles retries and escalation.
+description: Orchestrated multi-agent implementation using Tech Lead + Developer pattern. Use when implementing phased plans from docs/PLAN.md. Triggers: /swarm, "implement the plan", "run phased implementation", "execute PLAN.md phases". Spawns Developer agents in isolated git worktrees per phase, reviews PRs, handles retries and escalation.
 ---
 
 # Swarm - Orchestrated Multi-Agent Implementation
 
-Execute a phased implementation plan using a Tech Lead + Developer agent pattern.
+Execute a phased implementation plan using a Tech Lead + Developer agent
+pattern. Each phase runs in its **own git worktree**, so the main checkout
+never switches branches and independent phases can run in parallel.
 
 ## Arguments
 
@@ -16,13 +18,17 @@ Execute a phased implementation plan using a Tech Lead + Developer agent pattern
 
 ```
 For each phase in plan:
-  1. Create branch from current main
-  2. Spawn Developer agent to implement
+  1. Create a worktree + branch for the phase (main checkout stays on main)
+  2. Spawn Developer agent working inside that worktree
   3. Developer creates PR when done
   4. Tech Lead (this agent) reviews PR
-  5. If APPROVED: merge and continue
+  5. If APPROVED: merge, clean up worktree + branch, continue
   6. If CHANGES_REQUESTED: Developer fixes (max 3 attempts)
   7. If max attempts exceeded: ESCALATE to human
+
+Phases marked independent in the plan MAY run in parallel (one worktree +
+one Developer agent each). Dependent phases run sequentially — each starts
+from main AFTER the previous phase merged.
 ```
 
 ## Step 1: Parse Plan
@@ -35,6 +41,9 @@ Read the plan file and extract phases. Each phase has this structure:
 
 ### Branch
 `phase-N-name`
+
+### Depends on
+Phase N-1 (or "none" — independent phases may run in parallel)
 
 ### Scope
 ...
@@ -51,14 +60,24 @@ Read the plan file and extract phases. Each phase has this structure:
 <!-- /PHASE:N -->
 ```
 
-## Step 2: For Each Phase
+## Step 2: Create a worktree for the phase
+
+Run from the primary checkout (never `git checkout` a phase branch there):
 
 ```bash
-git checkout main && git pull
-git checkout -b <branch-name>
+MAIN_WT=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
+git -C "$MAIN_WT" pull origin main
+git -C "$MAIN_WT" worktree add "$MAIN_WT/.claude/worktrees/<branch-name>" -b <branch-name> main
 ```
 
+If the Agent tool supports `isolation: "worktree"`, prefer that — it creates
+and cleans up the worktree automatically. Otherwise pass the worktree path to
+the Developer agent explicitly.
+
 ## Step 3: Spawn Developer Agent
+
+For parallel-safe phases, send multiple Task calls in a single message — one
+Developer per phase, each in its own worktree.
 
 ```
 Task(
@@ -66,6 +85,12 @@ Task(
   description: "Implement Phase N",
   prompt: """
 You are a Developer agent implementing Phase N.
+
+## Working directory
+You work EXCLUSIVELY inside the worktree: <worktree-path>
+It is already on branch <branch-name>. Never touch the primary checkout,
+never switch branches. All file paths and commands are relative to this
+worktree.
 
 ## Task
 Read the plan file, find Phase N (between <!-- PHASE:N --> markers), implement EVERYTHING in Scope.
@@ -76,14 +101,14 @@ The Tech Lead will verify:
 1. **Every file** in "Files to Create/Modify" exists and has real implementation
 2. **Every acceptance criterion** is fully implemented (not stubbed)
 3. **Every test** in "Tests Required" exists and passes
-4. **Integration points** - router registered, config in .env.example, migration matches ORM
+4. **Integration points** - routes/entry points registered, config documented, migrations match models
 
 DO NOT:
 - Create stub implementations (empty functions, pass, TODO comments)
 - Skip any file from the list
 - Write trivial tests that don't verify real behavior
 - Leave acceptance criteria partially implemented
-- Forget to register routers or add config vars
+- Forget to register routers/entry points or add config vars
 
 ## Rules
 1. Follow CLAUDE.md configuration standards (no hardcoded values, fail fast)
@@ -92,22 +117,17 @@ DO NOT:
 4. For each acceptance criterion, identify WHERE in your code it's satisfied
 5. Commit with clear messages referencing the phase
 
-## Branch
-You are on branch: <branch-name>
-
 ## Before Creating PR - Self-Review Checklist
-
-Before creating the PR, verify yourself:
 - [ ] All files from "Files to Create/Modify" exist
 - [ ] No TODO/FIXME/placeholder comments in new code
 - [ ] All acceptance criteria have corresponding implementation
-- [ ] All tests pass: `python -m pytest <module>/tests/ -v`
-- [ ] Router registered in main.py (if new module)
-- [ ] Config vars in .env.example (if new config)
+- [ ] All tests pass (run the project's test command)
+- [ ] New entry points registered, new config vars documented
 
 ## When Done
-Create PR with acceptance criteria as checklist:
+Push the branch and create a PR with acceptance criteria as checklist:
 
+git push -u origin <branch-name>
 gh pr create --title "Phase N: <name>" --body "$(cat <<'EOF'
 ## Implementation Summary
 <brief description>
@@ -115,10 +135,9 @@ gh pr create --title "Phase N: <name>" --body "$(cat <<'EOF'
 ## Acceptance Criteria
 - [ ] Criterion 1 - implemented in `file.py:function()`
 - [ ] Criterion 2 - implemented in `file.py:function()`
-...
 
 ## Tests
-- `pytest <module>/tests/ -v` - X tests pass
+- <test command> - X tests pass
 
 ## Files Changed
 <list of files created/modified>
@@ -132,144 +151,85 @@ Report back with PR number.
 
 ## Step 4: Review the PR (RIGOROUS)
 
-**IMPORTANT:** Previous swarm runs had phases that were incomplete or sloppy. This review MUST be thorough. Do NOT approve until ALL checks pass.
+**IMPORTANT:** Previous swarm runs had phases that were incomplete or sloppy.
+Review inside the phase's worktree (`cd <worktree-path>` or absolute paths).
+Do NOT approve until ALL checks pass.
 
 ### 4.1 File Inventory Check
 
-Read the phase's "Files to Create/Modify" list. For EACH file:
-```bash
-# Check file exists
-ls -la <file-path>
+For EACH file in the phase's "Files to Create/Modify" list: check it exists,
+read it, verify the content is substantial.
 
-# Read and verify content is substantial (not stub/placeholder)
-Read <file-path>
-```
-
-**FAIL if:**
-- Any listed file is missing
-- Any file contains TODO/FIXME/placeholder comments
-- Any file is a stub (empty class, pass-only functions)
-- Any file has `# Implementation needed` or similar
+**FAIL if:** any listed file is missing; any file contains TODO/FIXME/
+placeholder comments; any file is a stub (empty class, pass-only functions).
 
 ### 4.2 Acceptance Criteria Verification
 
-For EACH criterion in "Acceptance Criteria" section:
-
-1. **Read the criterion literally** - what exactly does it require?
-2. **Find evidence** - which file/function implements it?
-3. **Verify behavior** - run specific test or manual check
+For EACH criterion: read it literally, find the implementing code, verify
+behavior (run a specific test or manual check).
 
 ```markdown
 | Criterion | Evidence | Verified |
 |-----------|----------|----------|
 | "Can create quota for user" | quotas/service.py:create_quota() | ✓ test passes |
 | "Unique constraint prevents duplicates" | migration has UNIQUE KEY | ✓ |
-| "Only managers can set quotas" | router.py uses require_role("manager") | ✓ |
 ```
 
-**FAIL if:**
-- Any criterion has no corresponding implementation
-- Any criterion is partially implemented
-- Any criterion relies on code that doesn't exist yet
+**FAIL if:** any criterion has no implementation, is partial, or relies on
+code that doesn't exist yet.
 
 ### 4.3 Test Coverage Check
 
-```bash
-# Run the phase's tests specifically
-cd apps/crm-api && python -m pytest <module>/tests/ -v
-
-# Check all tests pass
-# Check test count matches "Tests Required" list
-```
-
-**FAIL if:**
-- Any test fails
-- Test count is significantly lower than specified in plan
-- Tests are trivial (e.g., `assert True`)
+Run the phase's tests inside the worktree. **FAIL if:** any test fails, test
+count is significantly lower than the plan specifies, or tests are trivial
+(`assert True`).
 
 ### 4.4 Integration Points Check
 
-For new modules, verify:
-
-```bash
-# Router registered in main.py?
-grep -n "<router>" apps/crm-api/app/main.py
-
-# Config vars in .env.example?
-grep -n "<new_config_var>" apps/crm-api/.env.example
-
-# ORM model matches migration?
-# Compare column names, types, nullability
-```
-
-**FAIL if:**
-- Router not registered (endpoints unreachable)
-- Config vars missing from .env.example
-- Migration and ORM model have mismatches
+For new modules verify: entry points/routers registered, config vars
+documented (.env.example or equivalent), migrations match ORM models.
+**FAIL if** endpoints are unreachable or config is undocumented.
 
 ### 4.5 Code Quality Check
 
 1. **No hardcoded values** - all thresholds from config
 2. **No silent defaults** - missing required config = startup failure
-3. **UUID not INT** - all IDs are VARCHAR(36)
-4. **Follows existing patterns** - check similar modules for consistency
+3. **Follows existing patterns** - check similar modules for consistency
 
 ### 4.6 Final Verdict
 
-Only after ALL above checks pass:
+Only after ALL checks pass, produce the review report:
 
 ```markdown
 ## PR Review: Phase N
 
-### File Inventory: ✓ PASS
-- [x] All 8 files created
-- [x] No stubs or placeholders
-
-### Acceptance Criteria: ✓ PASS
-| Criterion | Status |
-|-----------|--------|
-| Criterion 1 | ✓ Verified in service.py:45 |
-| Criterion 2 | ✓ Test test_unique_constraint passes |
-| ... | ... |
-
-### Tests: ✓ PASS
-- 8/8 tests pass
-- Matches "Tests Required" list
-
+### File Inventory: ✓ PASS (all N files, no stubs)
+### Acceptance Criteria: ✓ PASS (table with evidence per criterion)
+### Tests: ✓ PASS (X/X, matches "Tests Required")
 ### Integration: ✓ PASS
-- Router registered in main.py:67
-- Config vars in .env.example
-
 ### Code Quality: ✓ PASS
 
 **VERDICT: APPROVED**
 ```
 
-If ANY check fails:
-
-```markdown
-## PR Review: Phase N
-
-### FAILED CHECKS:
-
-1. **Acceptance Criteria #3 not implemented**
-   - "Quota attainment calculates correctly from closed-won opportunities"
-   - No implementation found in service.py
-   - Required: Add get_quota_attainment() method
-
-2. **Missing test**
-   - "Tests Required" lists "Fiscal period calculation" but no such test exists
-
-**VERDICT: CHANGES_REQUESTED**
-```
+If ANY check fails, list each failed check with what is missing and what is
+required, then **VERDICT: CHANGES_REQUESTED**.
 
 ## Step 5: Decision
 
 **APPROVED:**
 ```bash
 gh pr merge <pr-number> --squash --delete-branch
+
+# Post-merge cleanup (see post-merge skill): sync main, drop the worktree
+git -C "$MAIN_WT" pull origin main
+git -C "$MAIN_WT" worktree remove "$MAIN_WT/.claude/worktrees/<branch-name>"
+git -C "$MAIN_WT" worktree prune
+git -C "$MAIN_WT" branch -d <branch-name> 2>/dev/null || true
+git -C "$MAIN_WT" remote prune origin
 ```
-Continue to next phase.
+Continue to next phase (dependent phases create their worktree from the
+freshly pulled main).
 
 **CHANGES_REQUESTED:**
 ```
@@ -277,13 +237,16 @@ Task(
   prompt: """
 Your PR for Phase N needs changes.
 
+## Working directory
+Fix EXCLUSIVELY inside the worktree: <worktree-path> (branch <branch-name>).
+
 ## Feedback
 <specific feedback>
 
 ## Required Changes
 1. ...
 
-Fix on same branch and push. Attempt: <N>/3
+Fix, commit, and push to the same branch. Attempt: <N>/3
 """
 )
 ```
@@ -294,7 +257,7 @@ ESCALATE: Phase N requires human intervention.
 PR: <url>
 Issues: <summary>
 ```
-Stop and notify user.
+Keep the worktree for inspection. Stop and notify the user.
 
 ## Step 6: Progress Tracking
 
@@ -303,16 +266,17 @@ After each phase:
 ```
 ## Swarm Progress
 
-| Phase | Status | PR | Attempts |
-|-------|--------|-----|----------|
-| 1     | DONE   | #12 | 1        |
-| 2     | IN_PROGRESS | #13 | 1   |
-| 3     | PENDING | -  | -        |
+| Phase | Status      | Worktree                       | PR  | Attempts |
+|-------|-------------|--------------------------------|-----|----------|
+| 1     | DONE        | (removed)                      | #12 | 1        |
+| 2     | IN_PROGRESS | .claude/worktrees/phase-2-api  | #13 | 1        |
+| 3     | PENDING     | -                              | -   | -        |
 ```
 
 ## Error Handling
 
-- **Git conflict:** Escalate immediately
+- **Git conflict on merge:** Escalate immediately (parallel phases touching the same files)
+- **`worktree add` fails (branch exists):** `git worktree prune`, delete the stale branch, retry once
 - **CI failure:** Count as failed review attempt
 - **Agent timeout:** Retry once, then escalate
 - **Network error:** Retry with backoff
