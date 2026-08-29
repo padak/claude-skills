@@ -1,0 +1,16 @@
+{
+  "name": "second-opinion",
+  "version": "1.0.0",
+  "description": "Get a second opinion from OpenAI (Codex), Google (Gemini) or Anthropic (Claude Code) CLIs. Single provider or multi-model consensus for architecture decisions and security review.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "code-review",
+    "multi-model",
+    "consensus"
+  ]
+}

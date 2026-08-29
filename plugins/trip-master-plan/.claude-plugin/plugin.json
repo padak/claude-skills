@@ -1,0 +1,18 @@
+{
+  "name": "trip-master-plan",
+  "version": "1.0.0",
+  "description": "Plan a trip end-to-end and deliver a versioned HTML MASTER itinerary: assessment interview, date-verified attractions and local events, route alternatives, real-geodata SVG maps whose routes follow actual roads, day cards with drive times, Wikimedia photos with credits, a weather widget, and copy-to-clipboard research prompts. Ships the trip-fact-checker agent for the adversarial audit phase.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "travel",
+    "itinerary",
+    "maps",
+    "research",
+    "artifact"
+  ]
+}

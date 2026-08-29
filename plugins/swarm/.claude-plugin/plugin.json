@@ -1,0 +1,17 @@
+{
+  "name": "swarm",
+  "version": "1.0.0",
+  "description": "Orchestrated multi-agent implementation using a Tech Lead plus Developer pattern. Spawns Developer agents in isolated git worktrees per phase, reviews PRs, handles retries and escalation.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "multi-agent",
+    "orchestration",
+    "worktree",
+    "planning"
+  ]
+}

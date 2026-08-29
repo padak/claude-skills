@@ -1,0 +1,16 @@
+{
+  "name": "keboola-data-app",
+  "version": "1.0.0",
+  "description": "Build Streamlit-based Keboola Data Apps with Storage Files API integration, OIDC authentication via proxy headers, and multi-step wizard patterns.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "keboola",
+    "streamlit",
+    "data-app"
+  ]
+}

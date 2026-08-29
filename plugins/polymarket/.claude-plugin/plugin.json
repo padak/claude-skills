@@ -1,0 +1,17 @@
+{
+  "name": "polymarket",
+  "version": "1.0.0",
+  "description": "Build trading bots and applications on Polymarket prediction markets: py-clob-client SDK, WebSocket streaming, order placement, market data, whale tracking and arbitrage detection.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "polymarket",
+    "trading",
+    "prediction-markets",
+    "clob"
+  ]
+}

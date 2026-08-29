@@ -1,118 +1,97 @@
-# Claude Code Boilerplate
+# Claude Code Kit
 
 Personal [Claude Code](https://docs.anthropic.com/en/docs/claude-code) setup used by petr@keboola.com. Use at your own risk.
 
-Fork this repo and you get a pre-configured Claude Code environment with skills, subagents, permissions, hooks, and shell aliases.
+A plugin marketplace with eight skills, plus the permission ruleset and global instructions I actually work with daily.
 
-## What's Inside
+## Install
 
-### `.claude/settings.json` - Team Settings
+Add the marketplace once:
 
-Pre-configured permissions so Claude doesn't ask you every time it runs `git status` or `ls`:
+```bash
+/plugin marketplace add padak/claude-code-kit
+```
 
-- **allow** - Auto-approved: git operations, python/node/build tools, file exploration, web search, Playwright, Perplexity, Atlassian MCP, gcloud/terraform/aws/docker
-- **deny** - Hard-blocked: reading `.env`, credentials, SSH keys, certificates, secrets (69 rules)
-- **ask** - Requires confirmation: `rm`, `git push --force`, `pip install`, `docker`, `kubectl`, package.json edits
+Then install only the plugins you want:
 
-Hooks that run automatically:
-- **PostToolUse** - Auto-compiles Python (`py_compile`) and TypeScript (`tsc --noEmit`) after every file edit - catches syntax errors immediately
-- **Notification** - macOS notification when Claude needs your attention (useful for long-running tasks)
+```bash
+/plugin install trip-master-plan@claude-code-kit
+```
 
-### `.claude/skills/` - Slash Commands & Knowledge
+Each skill is its own plugin, so nothing arrives that you did not ask for. Browse and install interactively with `/plugin`, and update everything later with `/plugin marketplace update claude-code-kit`.
 
-| Skill | Trigger | What it does |
-|-------|---------|--------------|
-| **claude-agent-sdk** | `/claude-agent-sdk` | Reference for building apps with Claude Agent SDK (TypeScript/Python) |
-| **e2b** | `/e2b` | Execute code in secure E2B cloud sandboxes with MCP gateway |
-| **keboola-data-app** | `/keboola-data-app` | Streamlit + Google Sheets patterns for Keboola data apps |
-| **polymarket** | `/polymarket` | Build trading bots on Polymarket (py-clob-client SDK, WebSocket, order placement) |
-| **post-merge** | `/post-merge` | After merging a PR: sync main, remove the merged worktree/branch, watch CI/CD. Worktree-aware (works from `.claude/worktrees` sessions) |
-| **second-opinion** | `/second-opinion` | External AI review via Codex (GPT-5.6 Sol/Terra/Luna), Gemini, or Claude Code CLI - single provider or multi-model consensus |
-| **swarm** | `/swarm` | Multi-agent implementation: Tech Lead spawns Developer agents in isolated git worktrees per phase, reviews PRs, handles retries |
-| **trip-master-plan** | `/trip-master-plan` | End-to-end trip planner: interviews you, date-verifies attractions & local events, then compiles a versioned HTML artifact with route alternatives, real-geodata SVG maps (routes follow actual roads), day cards with drive times, Wikimedia photos with credits, weather map with scheduled auto-refresh, and copy-to-clipboard research prompts. Ships a `trip-fact-checker` agent for the adversarial audit phase |
+## Plugins
 
-Removed in the 2026-08 facelift: **Browser** (Playwright-based, superseded by Claude Code's built-in browser and the Claude Chrome MCP) and **skill-creator** (superseded by the official `anthropic-skills:skill-creator` plugin).
+| Plugin | Trigger | What it does |
+|--------|---------|--------------|
+| `claude-agent-sdk` | `/claude-agent-sdk` | Reference for building apps with the Claude Agent SDK (TypeScript/Python): `query()`, `ClaudeSDKClient`, custom MCP tools, subagents, sessions, permissions, hooks, structured outputs, cost tracking, hosting |
+| `e2b` | `/e2b` | Execute code in secure isolated E2B cloud sandboxes: lifecycle, code interpreters, running coding agents inside sandboxes, MCP gateway, storage mounting, metrics |
+| `keboola-data-app` | `/keboola-data-app` | Streamlit data apps for the Keboola platform: Storage Files API, OIDC auth via proxy headers, multi-step wizard patterns |
+| `polymarket` | `/polymarket` | Trading bots on Polymarket prediction markets: py-clob-client SDK, WebSocket streaming, order placement, whale tracking, arbitrage detection |
+| `post-merge` | `/post-merge` | After merging a PR: sync main, remove the merged worktree and branch, watch CI/CD. Works from a plain checkout or from a `.claude/worktrees` session |
+| `second-opinion` | `/second-opinion` | External review via the Codex, Gemini or Claude Code CLIs — single provider, or multi-model consensus when a decision is worth the extra round trip |
+| `swarm` | `/swarm` | Multi-agent implementation of a phased plan: a Tech Lead spawns Developer agents in isolated git worktrees per phase, reviews their PRs, handles retries and escalation |
+| `trip-master-plan` | `/trip-master-plan` | End-to-end trip planner. Interviews you, date-verifies attractions and local events, then compiles a versioned HTML artifact: route alternatives, SVG maps built from Natural Earth geodata whose routes follow real roads, day cards with drive times, Wikimedia photos with license credits, a weather widget, and copy-to-clipboard research prompts. Ships a `trip-fact-checker` subagent that audits the result adversarially |
 
-Some skills need local tooling: **trip-master-plan** shells out to `python3` (stdlib only) and `curl` — its `scripts/fetch_geo.sh` downloads ~85 MB of Natural Earth GeoJSON into a `geo/` directory in your working folder on first use. The geodata is not vendored in this repo.
+`trip-master-plan` is the only plugin with runtime dependencies: `python3` (stdlib only) and `curl`. On first use it downloads ~85 MB of Natural Earth GeoJSON into a `geo/` directory in your working folder; the geodata is not vendored here.
 
-### `.claude/agents/` - Subagents
+### Subagents
 
-Subagent definitions that skills (or you) can spawn in parallel. Each runs in its own clean context with a restricted toolset, so a long audit does not flood the main session.
+`trip-master-plan` ships `trip-fact-checker` — a read-only adversarial verifier (`Read`, `Grep`, `WebSearch`, `WebFetch`) spawned one instance per section, in parallel. It reports only problems, each with an exact quote, what is wrong, a drop-in correction and a source URL. Running it as a subagent rather than inline keeps a long audit out of the main session's context.
 
-| Agent | Spawned by | What it does |
-|-------|-----------|--------------|
-| **trip-fact-checker** | `trip-master-plan` (Phase 7), or on request | Adversarial "arbitr" for one section of a travel plan. Verifies dates, superlatives, measurements, prices and historical claims against primary sources; reports only problems, each with an exact quote, what is wrong, a drop-in corrected phrasing and a source URL. Read-only (`Read`, `Grep`, `WebSearch`, `WebFetch`) |
+## Configuration
 
-### `CLAUDE.md` - Global Instructions
+Plugins cannot install user-level configuration, so `.claude/settings.json` and `CLAUDE.md` are copied by hand:
 
-Rules that shape how Claude behaves in every project:
+```bash
+git clone https://github.com/padak/claude-code-kit.git
+cd claude-code-kit
+cp .claude/settings.json ~/.claude/settings.json
+cp CLAUDE.md ~/.claude/CLAUDE.md
+```
 
-- Communicates in Czech, writes code in English
-- Uses Perplexity MCP for research before implementing unknown tech
-- Parallel sub-agents for independent tasks (mandatory)
-- No mock implementations, no TODO stubs, no hardcoded values
-- Fail-fast on missing config (no silent defaults)
-- Structured JSON logging for all server apps
-- Clean commits (no Co-Authored-By, no Generated-with footer)
+Read both before overwriting yours — they are opinionated.
 
-### `.zshrc` - Shell Aliases
+### Why this `settings.json`
+
+Permissions are split by **how reversible an action is**, not by how dangerous it sounds:
+
+- **allow** — things that cannot break anything: `git status`, `ls`, `grep`, reading files, running tests, `python`, build tools. Auto-approving these is where the time saving actually comes from; they are also the calls Claude makes most often.
+- **ask** — things that destroy work or are hard to undo: `rm`, `git push --force`, `git reset --hard`, `git clean`, package installs, `docker`, `kubectl`, and edits to lockfiles and `package.json`. Not blocked, just deliberate.
+- **deny** — reading or writing secrets: `.env` files, SSH keys, `.aws/credentials`, certificates, keystores, anything matching `*token*`, `*password*`, `*credentials*`. This is the rule set worth copying even if you take nothing else. It is not about trust; it removes an entire class of accident where a secret gets pulled into the transcript and from there into a commit, a bug report or a PR description.
+
+Two hooks:
+
+- **PostToolUse** runs `py_compile` on edited Python and `tsc --noEmit` on edited TypeScript. Catching a syntax error at the moment of the edit beats discovering it ten steps later, when the fix means unwinding everything in between.
+- **Notification** fires a macOS notification when Claude needs you — worth it once tasks run long enough that you switch windows.
+
+### Why this `CLAUDE.md`
+
+Most of it exists to close off shortcuts that are locally convenient and globally expensive:
+
+- **No mocks, no stubs, no `TODO: implement later`.** If something is in the plan it gets built, or Claude asks. Left unstated, a blocked step quietly becomes a fake one that passes tests and fails in production.
+- **No hardcoded values, no silent defaults.** Config lives in config files; a missing required variable fails loudly at startup instead of falling back to an invented value. A wrong default is much harder to debug than a crash.
+- **Parallel subagents for independent work** — mandatory, not a suggestion, because the default instinct is to do things one at a time.
+- **Research before implementing unfamiliar tech**, via Perplexity MCP, with explicit cost tiers so the cheap tool is the default and the expensive one is deliberate.
+- **Czech in conversation, English in files.** Separating the language you think in from the language the artifact ships in keeps the codebase readable to everyone else.
+- **Clean commits** — no `Co-Authored-By`, no generated-with footers.
+
+### `.zshrc`
 
 ```bash
 alias cc="claude --allow-dangerously-skip-permissions --chrome"
 ```
 
-I run Claude as `cc` in full YOLO mode - all permissions bypassed, no confirmation prompts. Chrome MCP included for browser automation. This is how I work daily; if you prefer guardrails, use `claude` directly instead.
-
-Also: auto-activates `.venv` if present, `gtimeout` alias for macOS.
-
-## Installation
-
-### Option A: Fork and clone (recommended)
-
-```bash
-# Fork on GitHub, then:
-git clone https://github.com/YOUR_USERNAME/claude-code-kit.git
-cd claude-code-kit
-
-# Copy what you need to your global config:
-cp .claude/settings.json ~/.claude/settings.json
-cp CLAUDE.md ~/.claude/CLAUDE.md
-cp -r .claude/skills/* ~/.claude/skills/
-mkdir -p ~/.claude/agents && cp .claude/agents/* ~/.claude/agents/
-
-# Optional: add shell aliases
-cat .zshrc >> ~/.zshrc && source ~/.zshrc
-```
-
-### Option B: Install a single skill
-
-Skills are self-contained directories - you can cherry-pick one without taking the rest:
-
-```bash
-# Example: just the trip planner and the agent it spawns
-cp -r .claude/skills/trip-master-plan ~/.claude/skills/
-mkdir -p ~/.claude/agents && cp .claude/agents/trip-fact-checker.md ~/.claude/agents/
-```
-
-Restart Claude Code, then confirm it registered - `/trip-master-plan` should appear in the slash-command list.
-
-### Option C: Just tell Claude
-
-```
-Clone https://github.com/padak/claude-code-kit and copy .claude/settings.json
-to ~/.claude/settings.json, CLAUDE.md to ~/.claude/CLAUDE.md, all skills from
-.claude/skills/ to ~/.claude/skills/, and all agents from .claude/agents/ to
-~/.claude/agents/
-```
+I run Claude as `cc` in full YOLO mode — all permissions bypassed, Chrome MCP included. That is how I work daily; if you want the guardrails above, use `claude` directly. Also included: auto-activation of `.venv` if present, and a `gtimeout` alias for macOS.
 
 ## Customization
 
-- **Personal overrides** go in `~/.claude/settings.local.json` (not tracked by git)
-- **Language** - set `"language": "Czech"` (or your language) in settings.local.json
-- **Remove skills** you don't need - just delete the directory from `.claude/skills/`
-- **Add your own skills** - create a new directory with `SKILL.md` in `.claude/skills/`
-- **Add your own subagents** - drop a Markdown file with `name` / `description` / `tools` front matter into `.claude/agents/`
-- **Project-scoped install** - copy into a project's own `.claude/skills/` and `.claude/agents/` instead of `~/.claude/` to keep a skill scoped to one repo
+- **Personal overrides** go in `~/.claude/settings.local.json`, which git ignores
+- **Language** — set `"language": "Czech"` (or yours) in `settings.local.json`
+- **Add a skill to a plugin** — create a directory with a `SKILL.md` under `plugins/<plugin>/skills/`
+- **Add a subagent** — drop a Markdown file with `name` / `description` / `tools` front matter into `plugins/<plugin>/agents/`
+- **Add a new plugin** — create `plugins/<name>/.claude-plugin/plugin.json` and list it in `.claude-plugin/marketplace.json`
+- **Develop against a local checkout** — `/plugin marketplace add ./claude-code-kit` points at your working copy instead of GitHub
 
 ## License
 

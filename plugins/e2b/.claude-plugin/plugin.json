@@ -1,0 +1,17 @@
+{
+  "name": "e2b",
+  "version": "1.0.0",
+  "description": "Execute AI-generated code in secure isolated E2B cloud sandboxes (SDK v2): sandbox lifecycle, code interpreters, running coding agents, git operations, MCP gateway, storage mounting and metrics.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "e2b",
+    "sandbox",
+    "code-execution",
+    "mcp"
+  ]
+}

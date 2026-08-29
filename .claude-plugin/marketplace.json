@@ -1,0 +1,109 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-code-kit",
+  "version": "1.0.0",
+  "metadata": {
+    "description": "Personal Claude Code skills: trip planning, multi-agent orchestration, external model review, git workflow, and SDK/sandbox references. Install individually."
+  },
+  "owner": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "plugins": [
+    {
+      "name": "claude-agent-sdk",
+      "source": "./plugins/claude-agent-sdk",
+      "description": "Reference for building production applications with the Claude Agent SDK in TypeScript and Python: query(), ClaudeSDKClient, custom MCP tools, subagents, sessions, permissions, hooks, structured outputs, cost tracking and hosting.",
+      "version": "1.0.0",
+      "keywords": [
+        "agent-sdk",
+        "typescript",
+        "python",
+        "mcp"
+      ]
+    },
+    {
+      "name": "e2b",
+      "source": "./plugins/e2b",
+      "description": "Execute AI-generated code in secure isolated E2B cloud sandboxes (SDK v2): sandbox lifecycle, code interpreters, running coding agents, git operations, MCP gateway, storage mounting and metrics.",
+      "version": "1.0.0",
+      "keywords": [
+        "e2b",
+        "sandbox",
+        "code-execution",
+        "mcp"
+      ]
+    },
+    {
+      "name": "keboola-data-app",
+      "source": "./plugins/keboola-data-app",
+      "description": "Build Streamlit-based Keboola Data Apps with Storage Files API integration, OIDC authentication via proxy headers, and multi-step wizard patterns.",
+      "version": "1.0.0",
+      "keywords": [
+        "keboola",
+        "streamlit",
+        "data-app"
+      ]
+    },
+    {
+      "name": "polymarket",
+      "source": "./plugins/polymarket",
+      "description": "Build trading bots and applications on Polymarket prediction markets: py-clob-client SDK, WebSocket streaming, order placement, market data, whale tracking and arbitrage detection.",
+      "version": "1.0.0",
+      "keywords": [
+        "polymarket",
+        "trading",
+        "prediction-markets",
+        "clob"
+      ]
+    },
+    {
+      "name": "post-merge",
+      "source": "./plugins/post-merge",
+      "description": "Post-merge cleanup after a PR is merged on GitHub: syncs main, removes the merged worktree and branch, and watches CI/CD. Worktree-aware.",
+      "version": "1.0.0",
+      "keywords": [
+        "git",
+        "github",
+        "workflow",
+        "worktree"
+      ]
+    },
+    {
+      "name": "second-opinion",
+      "source": "./plugins/second-opinion",
+      "description": "Get a second opinion from OpenAI (Codex), Google (Gemini) or Anthropic (Claude Code) CLIs. Single provider or multi-model consensus for architecture decisions and security review.",
+      "version": "1.0.0",
+      "keywords": [
+        "code-review",
+        "multi-model",
+        "consensus"
+      ]
+    },
+    {
+      "name": "swarm",
+      "source": "./plugins/swarm",
+      "description": "Orchestrated multi-agent implementation using a Tech Lead plus Developer pattern. Spawns Developer agents in isolated git worktrees per phase, reviews PRs, handles retries and escalation.",
+      "version": "1.0.0",
+      "keywords": [
+        "multi-agent",
+        "orchestration",
+        "worktree",
+        "planning"
+      ]
+    },
+    {
+      "name": "trip-master-plan",
+      "source": "./plugins/trip-master-plan",
+      "description": "Plan a trip end-to-end and deliver a versioned HTML MASTER itinerary: assessment interview, date-verified attractions and local events, route alternatives, real-geodata SVG maps whose routes follow actual roads, day cards with drive times, Wikimedia photos with credits, a weather widget, and copy-to-clipboard research prompts. Ships the trip-fact-checker agent for the adversarial audit phase.",
+      "version": "1.0.0",
+      "keywords": [
+        "travel",
+        "itinerary",
+        "maps",
+        "research",
+        "artifact"
+      ]
+    }
+  ]
+}
