@@ -2,7 +2,7 @@
 
 Personal [Claude Code](https://docs.anthropic.com/en/docs/claude-code) setup used by petr@keboola.com. Use at your own risk.
 
-Fork this repo and you get a pre-configured Claude Code environment with skills, permissions, hooks, and shell aliases.
+Fork this repo and you get a pre-configured Claude Code environment with skills, subagents, permissions, hooks, and shell aliases.
 
 ## What's Inside
 
@@ -29,8 +29,19 @@ Hooks that run automatically:
 | **post-merge** | `/post-merge` | After merging a PR: sync main, remove the merged worktree/branch, watch CI/CD. Worktree-aware (works from `.claude/worktrees` sessions) |
 | **second-opinion** | `/second-opinion` | External AI review via Codex (GPT-5.6 Sol/Terra/Luna), Gemini, or Claude Code CLI - single provider or multi-model consensus |
 | **swarm** | `/swarm` | Multi-agent implementation: Tech Lead spawns Developer agents in isolated git worktrees per phase, reviews PRs, handles retries |
+| **trip-master-plan** | `/trip-master-plan` | End-to-end trip planner: interviews you, date-verifies attractions & local events, then compiles a versioned HTML artifact with route alternatives, real-geodata SVG maps (routes follow actual roads), day cards with drive times, Wikimedia photos with credits, weather map with scheduled auto-refresh, and copy-to-clipboard research prompts. Ships a `trip-fact-checker` agent for the adversarial audit phase |
 
 Removed in the 2026-08 facelift: **Browser** (Playwright-based, superseded by Claude Code's built-in browser and the Claude Chrome MCP) and **skill-creator** (superseded by the official `anthropic-skills:skill-creator` plugin).
+
+Some skills need local tooling: **trip-master-plan** shells out to `python3` (stdlib only) and `curl` — its `scripts/fetch_geo.sh` downloads ~85 MB of Natural Earth GeoJSON into a `geo/` directory in your working folder on first use. The geodata is not vendored in this repo.
+
+### `.claude/agents/` - Subagents
+
+Subagent definitions that skills (or you) can spawn in parallel. Each runs in its own clean context with a restricted toolset, so a long audit does not flood the main session.
+
+| Agent | Spawned by | What it does |
+|-------|-----------|--------------|
+| **trip-fact-checker** | `trip-master-plan` (Phase 7), or on request | Adversarial "arbitr" for one section of a travel plan. Verifies dates, superlatives, measurements, prices and historical claims against primary sources; reports only problems, each with an exact quote, what is wrong, a drop-in corrected phrasing and a source URL. Read-only (`Read`, `Grep`, `WebSearch`, `WebFetch`) |
 
 ### `CLAUDE.md` - Global Instructions
 
@@ -67,17 +78,31 @@ cd claude-code-kit
 cp .claude/settings.json ~/.claude/settings.json
 cp CLAUDE.md ~/.claude/CLAUDE.md
 cp -r .claude/skills/* ~/.claude/skills/
+mkdir -p ~/.claude/agents && cp .claude/agents/* ~/.claude/agents/
 
 # Optional: add shell aliases
 cat .zshrc >> ~/.zshrc && source ~/.zshrc
 ```
 
-### Option B: Just tell Claude
+### Option B: Install a single skill
+
+Skills are self-contained directories - you can cherry-pick one without taking the rest:
+
+```bash
+# Example: just the trip planner and the agent it spawns
+cp -r .claude/skills/trip-master-plan ~/.claude/skills/
+mkdir -p ~/.claude/agents && cp .claude/agents/trip-fact-checker.md ~/.claude/agents/
+```
+
+Restart Claude Code, then confirm it registered - `/trip-master-plan` should appear in the slash-command list.
+
+### Option C: Just tell Claude
 
 ```
 Clone https://github.com/padak/claude-code-kit and copy .claude/settings.json
-to ~/.claude/settings.json, CLAUDE.md to ~/.claude/CLAUDE.md, and all skills
-from .claude/skills/ to ~/.claude/skills/
+to ~/.claude/settings.json, CLAUDE.md to ~/.claude/CLAUDE.md, all skills from
+.claude/skills/ to ~/.claude/skills/, and all agents from .claude/agents/ to
+~/.claude/agents/
 ```
 
 ## Customization
@@ -86,6 +111,8 @@ from .claude/skills/ to ~/.claude/skills/
 - **Language** - set `"language": "Czech"` (or your language) in settings.local.json
 - **Remove skills** you don't need - just delete the directory from `.claude/skills/`
 - **Add your own skills** - create a new directory with `SKILL.md` in `.claude/skills/`
+- **Add your own subagents** - drop a Markdown file with `name` / `description` / `tools` front matter into `.claude/agents/`
+- **Project-scoped install** - copy into a project's own `.claude/skills/` and `.claude/agents/` instead of `~/.claude/` to keep a skill scoped to one repo
 
 ## License
 
