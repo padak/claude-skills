@@ -1,0 +1,17 @@
+{
+  "name": "post-merge",
+  "version": "1.0.0",
+  "description": "Post-merge cleanup after a PR is merged on GitHub: syncs main, removes the merged worktree and branch, and watches CI/CD. Worktree-aware.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "git",
+    "github",
+    "workflow",
+    "worktree"
+  ]
+}

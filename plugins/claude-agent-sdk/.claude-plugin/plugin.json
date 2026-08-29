@@ -1,0 +1,17 @@
+{
+  "name": "claude-agent-sdk",
+  "version": "1.0.0",
+  "description": "Reference for building production applications with the Claude Agent SDK in TypeScript and Python: query(), ClaudeSDKClient, custom MCP tools, subagents, sessions, permissions, hooks, structured outputs, cost tracking and hosting.",
+  "author": {
+    "name": "Petr Simecek",
+    "email": "petr@keboola.com"
+  },
+  "homepage": "https://github.com/padak/claude-code-kit",
+  "repository": "https://github.com/padak/claude-code-kit",
+  "keywords": [
+    "agent-sdk",
+    "typescript",
+    "python",
+    "mcp"
+  ]
+}
