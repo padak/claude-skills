@@ -29,7 +29,7 @@ Each skill is its own plugin, so nothing arrives that you did not ask for. Brows
 | `keboola-data-app` | `/keboola-data-app` | Streamlit data apps for the Keboola platform: Storage Files API, OIDC auth via proxy headers, multi-step wizard patterns |
 | `polymarket` | `/polymarket` | Trading bots on Polymarket prediction markets: py-clob-client SDK, WebSocket streaming, order placement, whale tracking, arbitrage detection |
 | `post-merge` | `/post-merge` | After merging a PR: sync main, remove the merged worktree and branch, watch CI/CD. Works from a plain checkout or from a `.claude/worktrees` session |
-| `second-opinion` | `/second-opinion` | External review via the Codex, Gemini or Claude Code CLIs — single provider, or multi-model consensus when a decision is worth the extra round trip |
+| `second-opinion` | `/second-opinion` | External review via the Codex, Antigravity (`agy`) or Claude Code CLIs — one-shot question, multi-round consultation, diff review, or multi-model consensus when a decision is worth the extra round trip |
 | `swarm` | `/swarm` | Multi-agent implementation of a phased plan: a Tech Lead spawns Developer agents in isolated git worktrees per phase, reviews their PRs, handles retries and escalation |
 | `trip-master-plan` | `/trip-master-plan` | End-to-end trip planner. Interviews you, date-verifies attractions and local events, then compiles a versioned HTML artifact: route alternatives, SVG maps built from Natural Earth geodata whose routes follow real roads, day cards with drive times, Wikimedia photos with license credits, a weather widget, and copy-to-clipboard research prompts. Ships a `trip-fact-checker` subagent that audits the result adversarially |
 

@@ -69,6 +69,7 @@
       "Bash(npx tsc:*)",
       "Bash(codex:*)",
       "Bash(gemini:*)",
+      "Bash(agy:*)",
 
       "Bash(make:*)",
       "Bash(curl:*)",
